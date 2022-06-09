@@ -1,0 +1,22 @@
+{
+  "name": "micro-image-cache",
+  "version": "1.0.0",
+  "main": "dist/index.js",
+  "repository": "git@github.com:veksen/micro-image-cache.git",
+  "author": "Jean-Philippe Sirois <jp@veksen.net>",
+  "license": "MIT",
+  "dependencies": {
+    "fastify": "^4.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "16.11.39",
+    "@typescript-eslint/eslint-plugin": "^5.27.1",
+    "@typescript-eslint/parser": "^5.27.1",
+    "eslint": "^8.17.0",
+    "eslint-config-prettier": "^8.5.0",
+    "eslint-plugin-import": "^2.26.0",
+    "eslint-plugin-prettier": "^4.0.0",
+    "prettier": "^2.6.2",
+    "typescript": "^4.7.3"
+  }
+}
