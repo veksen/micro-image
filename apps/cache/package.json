@@ -6,10 +6,13 @@
   "author": "Jean-Philippe Sirois <jp@veksen.net>",
   "license": "MIT",
   "dependencies": {
-    "fastify": "^4.0.0"
+    "axios": "^0.27.2",
+    "fastify": "^4.0.0",
+    "sharp": "^0.30.6"
   },
   "devDependencies": {
     "@types/node": "16.11.39",
+    "@types/sharp": "^0.30.4",
     "@typescript-eslint/eslint-plugin": "^5.27.1",
     "@typescript-eslint/parser": "^5.27.1",
     "eslint": "^8.17.0",
