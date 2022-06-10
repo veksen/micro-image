@@ -7,11 +7,17 @@ type CacheRequest = FastifyRequest<{
 }>;
 
 interface CompressOptions {
+  contentType?: string;
   width?: number;
   blur?: boolean;
 }
 
-const cache: Record<string, Buffer> = {};
+interface CacheRecord {
+  contentType: string;
+  buffer: Buffer;
+}
+
+const cache: Record<string, CacheRecord> = {};
 
 const fastify = Fastify({
   logger: true,
@@ -22,15 +28,34 @@ fastify.get("/", async (request, reply) => {
   return { hello: "world" };
 });
 
-function fromCache(id: string): Buffer | undefined {
+function fromCache(id: string): CacheRecord | undefined {
   return cache[id];
 }
 
-function toCache(id: string, buffer: Buffer): void {
-  cache[id] = buffer;
+function toCache(id: string, record: CacheRecord): void {
+  cache[id] = {
+    contentType: record.contentType,
+    buffer: record.buffer,
+  };
+}
+
+function imageFromMime(image: sharp.Sharp, mime?: string): sharp.Sharp {
+  switch (mime) {
+    case "image/png":
+      return image.png();
+    case "image/webp":
+      return image.webp();
+    case "image/gif":
+      return image.gif();
+    case "image/jpg":
+    case "image/jpeg":
+    default:
+      return image.jpeg({ mozjpeg: true });
+  }
 }
 
 function compress(buffer: Buffer, options: CompressOptions): Promise<Buffer> {
+  // TODO: support animated gif/webp
   let image = sharp(buffer);
 
   if (options.width) {
@@ -41,15 +66,17 @@ function compress(buffer: Buffer, options: CompressOptions): Promise<Buffer> {
     image = image.blur(10);
   }
 
-  return image.jpeg({ mozjpeg: true }).toBuffer();
+  image = imageFromMime(image, options.contentType);
+
+  return image.toBuffer();
 }
 
 fastify.get("/cache", async (request: CacheRequest, reply) => {
   const cached = fromCache(request.query.image);
 
   if (cached) {
-    reply.type("image/jpeg").code(200);
-    return cached;
+    reply.type(cached.contentType).code(200);
+    return cached.buffer;
   }
 
   const image = await axios(request.query.image, {
@@ -58,13 +85,17 @@ fastify.get("/cache", async (request: CacheRequest, reply) => {
 
   const imageBuffer = Buffer.from(image.data, "binary");
   const compressedBuffer = await compress(imageBuffer, {
+    contentType: image.headers["content-type"],
     width: Number(request.query.width),
     blur: request.query.blur === "true",
   });
 
-  toCache(request.query.image, compressedBuffer);
+  toCache(request.query.image, {
+    contentType: image.headers["content-type"],
+    buffer: compressedBuffer,
+  });
 
-  reply.type("image/jpeg").code(200);
+  reply.type(image.headers["content-type"]).code(200);
   return compressedBuffer;
 });
 
