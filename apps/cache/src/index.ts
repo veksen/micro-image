@@ -3,8 +3,13 @@ import axios from "axios";
 import sharp from "sharp";
 
 type CacheRequest = FastifyRequest<{
-  Querystring: { image: string };
+  Querystring: { image: string; width?: string; blur?: "true" | "false" };
 }>;
+
+interface CompressOptions {
+  width?: number;
+  blur?: boolean;
+}
 
 const cache: Record<string, Buffer> = {};
 
@@ -25,11 +30,18 @@ function toCache(id: string, buffer: Buffer): void {
   cache[id] = buffer;
 }
 
-function compress(buffer: Buffer): Promise<Buffer> {
-  return sharp(buffer)
-    .resize({ width: 1000, withoutEnlargement: true })
-    .jpeg({ mozjpeg: true })
-    .toBuffer();
+function compress(buffer: Buffer, options: CompressOptions): Promise<Buffer> {
+  let image = sharp(buffer);
+
+  if (options.width) {
+    image = image.resize({ width: options.width || 1000, withoutEnlargement: true });
+  }
+
+  if (options.blur) {
+    image = image.blur(10);
+  }
+
+  return image.jpeg({ mozjpeg: true }).toBuffer();
 }
 
 fastify.get("/cache", async (request: CacheRequest, reply) => {
@@ -45,7 +57,10 @@ fastify.get("/cache", async (request: CacheRequest, reply) => {
   });
 
   const imageBuffer = Buffer.from(image.data, "binary");
-  const compressedBuffer = await compress(imageBuffer);
+  const compressedBuffer = await compress(imageBuffer, {
+    width: Number(request.query.width),
+    blur: request.query.blur === "true",
+  });
 
   toCache(request.query.image, compressedBuffer);
 
