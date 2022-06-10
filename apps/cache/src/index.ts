@@ -1,6 +1,7 @@
 import Fastify, { FastifyRequest } from "fastify";
 import axios from "axios";
 import sharp from "sharp";
+import { fromCache, toCache } from "./cache";
 
 type CacheRequest = FastifyRequest<{
   Querystring: { image: string; width?: string; blur?: "true" | "false" };
@@ -12,13 +13,6 @@ interface CompressOptions {
   blur?: boolean;
 }
 
-interface CacheRecord {
-  contentType: string;
-  buffer: Buffer;
-}
-
-const cache: Record<string, CacheRecord> = {};
-
 const fastify = Fastify({
   logger: true,
 });
@@ -27,17 +21,6 @@ fastify.get("/", async (request, reply) => {
   reply.type("application/json").code(200);
   return { hello: "world" };
 });
-
-function fromCache(id: string): CacheRecord | undefined {
-  return cache[id];
-}
-
-function toCache(id: string, record: CacheRecord): void {
-  cache[id] = {
-    contentType: record.contentType,
-    buffer: record.buffer,
-  };
-}
 
 function imageFromMime(image: sharp.Sharp, mime?: string): sharp.Sharp {
   switch (mime) {
