@@ -60,6 +60,10 @@ function compress(buffer: Buffer, options: CompressOptions): Promise<Buffer> {
   return image.toBuffer();
 }
 
+function getSmallestImage(image1: Buffer, image2: Buffer): Buffer {
+  return image1.byteLength < image2.byteLength ? image1 : image2;
+}
+
 fastify.get("/cache", async (request: CacheRequest, reply) => {
   const cached = fromCache(request.query.image);
 
@@ -84,13 +88,15 @@ fastify.get("/cache", async (request: CacheRequest, reply) => {
     blur: request.query.blur === "true",
   });
 
+  const imageBufferToUse = getSmallestImage(compressedBuffer, imageBuffer);
+
   toCache(request.query.image, {
     contentType: image.headers["content-type"],
-    buffer: compressedBuffer,
+    buffer: imageBufferToUse,
   });
 
   reply.type(image.headers["content-type"]).code(200);
-  return compressedBuffer;
+  return imageBufferToUse;
 });
 
 fastify.listen({ port: 4000 }, (err, address) => {
