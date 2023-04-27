@@ -1,7 +1,12 @@
+import http from "http";
+import https from "https";
 import Fastify, { FastifyRequest } from "fastify";
 import axios from "axios";
 import sharp from "sharp";
 import { buildId, fromCache, toCache } from "./cache";
+
+const httpAgent = new http.Agent({ keepAlive: true });
+const httpsAgent = new https.Agent({ keepAlive: true });
 
 type CacheRequest = FastifyRequest<{
   Querystring: { image: string; width?: string; blur?: "true" | "false" };
@@ -78,6 +83,8 @@ fastify.get("/cache", async (request: CacheRequest, reply) => {
 
   const image = await axios(request.query.image, {
     responseType: "arraybuffer",
+    httpAgent,
+    httpsAgent,
   });
 
   if (!isSupported(image.headers["content-type"])) {
