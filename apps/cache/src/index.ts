@@ -22,6 +22,12 @@ fastify.get("/", async (request, reply) => {
   return { hello: "world" };
 });
 
+const supportedMimes = ["image/png", "image/webp", "image/gif", "image/jpg", "image/jpeg"];
+
+function isSupported(mime: string): boolean {
+  return supportedMimes.includes(mime);
+}
+
 function imageFromMime(image: sharp.Sharp, mime?: string): sharp.Sharp {
   switch (mime) {
     case "image/png":
@@ -65,6 +71,11 @@ fastify.get("/cache", async (request: CacheRequest, reply) => {
   const image = await axios(request.query.image, {
     responseType: "arraybuffer",
   });
+
+  if (!isSupported(image.headers["content-type"])) {
+    reply.type(image.headers["content-type"]).code(200);
+    return image.data;
+  }
 
   const imageBuffer = Buffer.from(image.data, "binary");
   const compressedBuffer = await compress(imageBuffer, {
