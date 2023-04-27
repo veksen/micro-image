@@ -1,7 +1,7 @@
 import Fastify, { FastifyRequest } from "fastify";
 import axios from "axios";
 import sharp from "sharp";
-import { fromCache, toCache } from "./cache";
+import { buildId, fromCache, toCache } from "./cache";
 
 type CacheRequest = FastifyRequest<{
   Querystring: { image: string; width?: string; blur?: "true" | "false" };
@@ -65,7 +65,11 @@ function getSmallestImage(image1: Buffer, image2: Buffer): Buffer {
 }
 
 fastify.get("/cache", async (request: CacheRequest, reply) => {
-  const cached = fromCache(request.query.image);
+  const id = buildId(request.query.image, {
+    width: Number(request.query.width),
+    blur: request.query.blur === "true",
+  });
+  const cached = fromCache(id);
 
   if (cached) {
     reply.type(cached.contentType).code(200);
@@ -90,7 +94,7 @@ fastify.get("/cache", async (request: CacheRequest, reply) => {
 
   const imageBufferToUse = getSmallestImage(compressedBuffer, imageBuffer);
 
-  toCache(request.query.image, {
+  toCache(id, {
     contentType: image.headers["content-type"],
     buffer: imageBufferToUse,
   });
