@@ -39,7 +39,7 @@ function imageFromMime(image: sharp.Sharp, mime?: string): sharp.Sharp {
     case "image/jpg":
     case "image/jpeg":
     default:
-      return image.jpeg({ mozjpeg: true });
+      return image.jpeg({ mozjpeg: true, quality: 75 });
   }
 }
 
