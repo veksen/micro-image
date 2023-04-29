@@ -13,7 +13,7 @@
   "devDependencies": {
     "@changesets/cli": "^2.22.0",
     "eslint": "^7.32.0",
-    "eslint-config-acme": "*",
+    "eslint-config-micro-image": "*",
     "prettier": "^2.5.1",
     "turbo": "latest"
   },

@@ -1,5 +1,5 @@
 {
-  "name": "@acme/core",
+  "name": "@micro-image/core",
   "version": "0.0.0",
   "main": "./dist/index.js",
   "module": "./dist/index.mjs",
@@ -16,9 +16,9 @@
     "clean": "rm -rf .turbo && rm -rf node_modules && rm -rf dist"
   },
   "devDependencies": {
-    "@acme/tsconfig": "*",
+    "@micro-image/tsconfig": "*",
     "eslint": "^7.32.0",
-    "eslint-config-acme": "*",
+    "eslint-config-micro-image": "*",
     "@types/react": "^18.2.0",
     "@types/react-dom": "^18.2.0",
     "react": "^17.0.2",

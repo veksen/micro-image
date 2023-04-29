@@ -1,5 +1,5 @@
 {
-  "name": "@acme/docs",
+  "name": "@micro-image/docs",
   "version": "0.0.0",
   "private": true,
   "scripts": {
@@ -10,18 +10,18 @@
     "clean": "rm -rf .turbo && rm -rf node_modules && rm -rf .next"
   },
   "dependencies": {
-    "@acme/core": "*",
-    "@acme/utils": "*",
+    "@micro-image/core": "*",
+    "@micro-image/utils": "*",
     "next": "latest",
     "react": "^18.2.0",
     "react-dom": "^18.2.0"
   },
   "devDependencies": {
-    "@acme/tsconfig": "*",
+    "@micro-image/tsconfig": "*",
     "@types/node": "^17.0.12",
     "@types/react": "^18.0.22",
     "@types/react-dom": "^18.0.7",
-    "eslint-config-acme": "*",
+    "eslint-config-micro-image": "*",
     "typescript": "^4.5.4"
   }
 }
