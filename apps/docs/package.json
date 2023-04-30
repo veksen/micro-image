@@ -10,7 +10,7 @@
     "clean": "rm -rf .turbo && rm -rf node_modules && rm -rf .next"
   },
   "dependencies": {
-    "@micro-image/core": "*",
+    "@micro-image/image": "*",
     "@micro-image/utils": "*",
     "next": "latest",
     "react": "^18.2.0",

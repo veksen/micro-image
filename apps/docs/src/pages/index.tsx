@@ -1,4 +1,4 @@
-import { Button } from "@micro-image/core";
+import Image from "@micro-image/image";
 import { useIsomorphicLayoutEffect } from "@micro-image/utils";
 
 export default function Docs() {
@@ -8,7 +8,11 @@ export default function Docs() {
   return (
     <div>
       <h1>micro-image Documentation</h1>
-      <Button>Click me</Button>
+      <Image
+        src="https://picsum.photos/id/237/1300/1300"
+        width={500}
+        height={500}
+      />
     </div>
   );
 }

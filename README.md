@@ -17,7 +17,7 @@ This Turborepo includes the following:
 ### Apps and Packages
 
 - `docs`: A placeholder documentation site powered by [Next.js](https://nextjs.org/)
-- `@micro-image/core`: core React components
+- `@micro-image/image`: React image component
 - `@micro-image/utils`: shared React utilities
 - `@micro-image/tsconfig`: shared `tsconfig.json`s used throughout the monorepo
 - `eslint-config-micro-image`: ESLint preset
