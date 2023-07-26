@@ -9,9 +9,10 @@ export default function Docs() {
     <div>
       <h1>micro-image Documentation</h1>
       <Image
-        src="https://picsum.photos/id/237/1300/1300"
-        width={500}
+        src="https://picsum.photos/id/237/800/500"
+        width={800}
         height={500}
+        alt=""
       />
     </div>
   );

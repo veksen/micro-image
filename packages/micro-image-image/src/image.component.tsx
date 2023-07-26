@@ -21,6 +21,7 @@ export interface IImageProps {
   src: string;
   width: number;
   height: number;
+  alt?: string;
 }
 
 function Image(props: IImageProps): JSX.Element {
@@ -99,7 +100,7 @@ function Image(props: IImageProps): JSX.Element {
             src={blurredImageSrc}
             ref={imageRef}
             style={{ width: "100%", height: "auto" }}
-            alt=""
+            alt={props.alt || ""}
           />
         )}
       </div>
