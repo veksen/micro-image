@@ -22,6 +22,7 @@ export interface IImageProps {
   width: number;
   height: number;
   alt?: string;
+  objectFit?: "none" | "cover" | "contain";
 }
 
 function Image(props: IImageProps): JSX.Element {
@@ -99,7 +100,11 @@ function Image(props: IImageProps): JSX.Element {
           <img
             src={blurredImageSrc}
             ref={imageRef}
-            style={{ width: "100%", height: "auto" }}
+            style={{
+              width: "100%",
+              height: "100%",
+              objectFit: props.objectFit || "none",
+            }}
             alt={props.alt || ""}
           />
         )}

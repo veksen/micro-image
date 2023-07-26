@@ -13,6 +13,7 @@ export default function Docs() {
         width={800}
         height={500}
         alt=""
+        objectFit="cover"
       />
     </div>
   );
