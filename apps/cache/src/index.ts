@@ -50,17 +50,17 @@ function imageFromMime(image: sharp.Sharp, mime?: string): sharp.Sharp {
 
 function compress(buffer: Buffer, options: CompressOptions): Promise<Buffer> {
   // TODO: support animated gif/webp
-  let image = sharp(buffer);
+  let sharpImage = sharp(buffer);
 
   if (options.width) {
-    image = image.resize({ width: options.width || 1000, withoutEnlargement: true });
+    sharpImage = sharpImage.resize({ width: options.width || 1000, withoutEnlargement: true });
   }
 
   if (options.blur) {
-    image = image.blur(10);
+    sharpImage = sharpImage.blur(10);
   }
 
-  image = imageFromMime(image, options.contentType);
+  const image = imageFromMime(sharpImage, options.contentType);
 
   return image.toBuffer();
 }
