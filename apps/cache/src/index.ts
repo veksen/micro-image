@@ -70,6 +70,14 @@ function getSmallestImage(image1: Buffer, image2: Buffer): Buffer {
   return image1.byteLength < image2.byteLength ? image1 : image2;
 }
 
+async function downloadImage(url: string) {
+  return axios(url, {
+    responseType: "arraybuffer",
+    httpAgent,
+    httpsAgent,
+  });
+}
+
 fastify.get("/cache", async (request: CacheRequest, reply) => {
   const id = buildId(request.query.image, {
     width: Number(request.query.width),
@@ -82,11 +90,7 @@ fastify.get("/cache", async (request: CacheRequest, reply) => {
     return cached.buffer;
   }
 
-  const image = await axios(request.query.image, {
-    responseType: "arraybuffer",
-    httpAgent,
-    httpsAgent,
-  });
+  const image = await downloadImage(request.query.image);
 
   if (!isSupported(image.headers["content-type"])) {
     reply.type(image.headers["content-type"]).code(200);
