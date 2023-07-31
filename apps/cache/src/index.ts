@@ -4,6 +4,7 @@ import Fastify, { FastifyRequest } from "fastify";
 import axios from "axios";
 import sharp from "sharp";
 import { buildId, fromCache, toCache } from "./cache";
+import { isAnimatedGif } from "./is-animated-gif";
 
 const httpAgent = new http.Agent({ keepAlive: true });
 const httpsAgent = new https.Agent({ keepAlive: true });
@@ -49,7 +50,7 @@ function imageFromMime(image: sharp.Sharp, mime?: string): sharp.Sharp {
 }
 
 function compress(buffer: Buffer, options: CompressOptions): Promise<Buffer> {
-  // TODO: support animated gif/webp
+  // TODO: support webp, double check against animated png
   let sharpImage = sharp(buffer);
 
   if (options.width) {
@@ -93,6 +94,17 @@ fastify.get("/cache", async (request: CacheRequest, reply) => {
   }
 
   const imageBuffer = Buffer.from(image.data, "binary");
+
+  if (isAnimatedGif(imageBuffer)) {
+    toCache(id, {
+      contentType: image.headers["content-type"],
+      buffer: imageBuffer,
+    });
+
+    reply.type(image.headers["content-type"]).code(200);
+    return imageBuffer;
+  }
+
   const compressedBuffer = await compress(imageBuffer, {
     contentType: image.headers["content-type"],
     width: Number(request.query.width),
