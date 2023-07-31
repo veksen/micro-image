@@ -85,6 +85,7 @@ fastify.get("/cache", async (request: CacheRequest, reply) => {
   });
   const cached = fromCache(id);
 
+  // found in cache, use it and return
   if (cached) {
     reply.type(cached.contentType).code(200);
     return cached.buffer;
@@ -92,6 +93,7 @@ fastify.get("/cache", async (request: CacheRequest, reply) => {
 
   const image = await downloadImage(request.query.image);
 
+  // not supported, return as is
   if (!isSupported(image.headers["content-type"])) {
     reply.type(image.headers["content-type"]).code(200);
     return image.data;
@@ -99,6 +101,7 @@ fastify.get("/cache", async (request: CacheRequest, reply) => {
 
   const imageBuffer = Buffer.from(image.data, "binary");
 
+  // animated gif, return as is
   if (isAnimatedGif(imageBuffer)) {
     toCache(id, {
       contentType: image.headers["content-type"],
@@ -109,12 +112,14 @@ fastify.get("/cache", async (request: CacheRequest, reply) => {
     return imageBuffer;
   }
 
+  // compress image
   const compressedBuffer = await compress(imageBuffer, {
     contentType: image.headers["content-type"],
     width: Number(request.query.width),
     blur: request.query.blur === "true",
   });
 
+  // use the smallest between original and compressed
   const imageBufferToUse = getSmallestImage(compressedBuffer, imageBuffer);
 
   toCache(id, {
