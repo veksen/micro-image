@@ -17,6 +17,7 @@ interface CompressOptions {
   contentType?: string;
   width?: number;
   blur?: boolean;
+  quality?: number;
 }
 
 const fastify = Fastify({
@@ -34,7 +35,7 @@ function isSupported(mime: string): boolean {
   return supportedMimes.includes(mime);
 }
 
-function imageFromMime(image: sharp.Sharp, mime?: string): sharp.Sharp {
+function imageFromMime(image: sharp.Sharp, mime?: string, quality?: number): sharp.Sharp {
   switch (mime) {
     case "image/png":
       return image.png();
@@ -45,7 +46,7 @@ function imageFromMime(image: sharp.Sharp, mime?: string): sharp.Sharp {
     case "image/jpg":
     case "image/jpeg":
     default:
-      return image.jpeg({ mozjpeg: true, quality: 75 });
+      return image.jpeg({ mozjpeg: true, quality: quality || 75 });
   }
 }
 
@@ -61,7 +62,7 @@ function compress(buffer: Buffer, options: CompressOptions): Promise<Buffer> {
     sharpImage = sharpImage.blur(10);
   }
 
-  const image = imageFromMime(sharpImage, options.contentType);
+  const image = imageFromMime(sharpImage, options.contentType, options.quality);
 
   return image.toBuffer();
 }
