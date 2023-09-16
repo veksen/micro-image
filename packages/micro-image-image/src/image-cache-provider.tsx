@@ -1,4 +1,6 @@
 import React from "react";
+import { generateUrl as generateUrlMicroImage } from "./providers/micro-image";
+import { generateUrl as generateUrlIpx } from "./providers/ipx";
 
 export const defaultConfig: IImageCacheProviderConfig = {
   provider: "micro-image",
@@ -29,12 +31,22 @@ export function ImageCacheProvider(config: ImageCacheProviderProps) {
   );
 }
 
+function getGeneralUrlFunction(provider: "micro-image" | "ipx") {
+  switch (provider) {
+    case "ipx":
+      return generateUrlIpx;
+    case "micro-image":
+      default:
+      return generateUrlMicroImage;
+  }
+}
+
 export function useImageCacheConfig() {
   const config = React.useContext(ImageCacheContext);
 
   if (!config) {
-    return defaultConfig;
+    return { ...defaultConfig, generateUrl: getGeneralUrlFunction(defaultConfig.provider) };
   }
 
-  return config;
+  return { ...config, generateUrl: getGeneralUrlFunction(defaultConfig.provider) };
 }

@@ -1,18 +1,26 @@
 import React, { useEffect, useMemo, useRef } from "react";
 import useImage from "./use-image.hook";
+import { useImageCacheConfig } from "./image-cache-provider";
+import { IProviderOptions } from "./providers/base";
 
 // TODO: remove hardcode
 const cacheProxy = "http://localhost:4000/cache";
 const quality = 75;
 const format = "jpg";
 
-const generateSrcSet = (src: string) => {
+const generateSrcSet = (baseSrc: string, generator: (options: IProviderOptions) => string) => {
   return Array.from({ length: 20 })
     .map((_, index) => index)
     .slice(1)
     .map((index) => {
       const width = index * 100;
-      return `${src}&width=${width}&format=${format}&quality=${quality} ${width}w`;
+      const url = generator({
+        url: cacheProxy,
+        src: baseSrc,
+        format: format,
+        quality: quality,
+      });
+      return `${url} ${width}w`;
     })
     .join(", ");
 };
@@ -26,17 +34,23 @@ export interface IImageProps {
 }
 
 function Image(props: IImageProps): JSX.Element {
+  const config = useImageCacheConfig();
+
   const imageRef = useRef<HTMLImageElement | null>(null);
   const observerRef = useRef<ResizeObserver | null>(null);
 
-  const imageSrc = `${cacheProxy}?image=${encodeURIComponent(props.src)}`;
-  const blurredImageSrc = `${imageSrc}&width=500&blur=true`;
+  const blurredImageSrc = config.generateUrl({
+    url: cacheProxy,
+    src: props.src,
+    width: 500,
+    blur: true,
+  });
 
   const { error } = useImage(props.src);
 
   const srcSet = useMemo(() => {
-    return generateSrcSet(imageSrc);
-  }, [imageSrc]);
+    return generateSrcSet(props.src, config.generateUrl);
+  }, [props.src, config.generateUrl]);
 
   const handleMount = () => {
     if (!imageRef.current) return;
