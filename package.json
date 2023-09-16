@@ -14,7 +14,7 @@
     "@changesets/cli": "^2.26.2",
     "eslint": "^8.49.0",
     "eslint-config-micro-image": "*",
-    "prettier": "^2.5.1",
+    "prettier": "^3.0.3",
     "turbo": "latest"
   },
   "packageManager": "yarn@1.22.19",
