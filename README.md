@@ -16,6 +16,7 @@ This Turborepo includes the following:
 
 ### Apps and Packages
 
+- `cache`: image proxy powered by [Fastify](https://fastify.dev/)
 - `docs`: A placeholder documentation site powered by [Next.js](https://nextjs.org/)
 - `@micro-image/image`: React image component
 - `@micro-image/utils`: shared React utilities
@@ -34,8 +35,8 @@ This Turborepo has some additional tools already setup for you:
 
 ### Useful commands
 
-- `yarn build` - Build all packages and the docs site
-- `yarn dev` - Develop all packages and the docs site
+- `yarn build` - Build all packages, the image proxy and docs site
+- `yarn dev` - Develop all packages, the image proxy and the docs site
 - `yarn lint` - Lint all packages
 - `yarn changeset` - Generate a changeset
 - `yarn clean` - Clean up all `node_modules` and `dist` folders (runs each package's clean script)
