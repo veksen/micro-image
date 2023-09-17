@@ -1,3 +1,6 @@
+> [!WARNING]
+> This set of package is still in development, not meant to be used at the time being.
+
 # Turborepo Design System starter with Changesets
 
 This is an official React design system starter powered by Turborepo. Versioning and package publishing is handled by [Changesets](https://github.com/changesets/changesets) and fully automated with GitHub Actions.
