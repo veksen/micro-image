@@ -4,20 +4,22 @@ import { useImageCacheConfig } from "./image-cache-provider";
 import { IProviderOptions } from "./providers/base";
 
 // TODO: remove hardcode
-const cacheProxy = "http://localhost:4000/cache";
 const quality = 75;
-const format = "jpg";
 
-const generateSrcSet = (baseSrc: string, generator: (options: IProviderOptions) => string) => {
+const generateSrcSet = (
+  baseSrc: string,
+  cacheProxyUrl: string,
+  generator: (options: IProviderOptions) => string
+) => {
   return Array.from({ length: 20 })
     .map((_, index) => index)
     .slice(1)
     .map((index) => {
       const width = index * 100;
       const url = generator({
-        url: cacheProxy,
+        url: cacheProxyUrl,
         src: baseSrc,
-        format: format,
+        width: width,
         quality: quality,
       });
       return `${url} ${width}w`;
@@ -39,18 +41,23 @@ function Image(props: IImageProps): JSX.Element {
   const imageRef = useRef<HTMLImageElement | null>(null);
   const observerRef = useRef<ResizeObserver | null>(null);
 
+  const imageSrc = config.generateUrl({
+    url: config.cacheProxyUrl,
+    src: props.src,
+    quality: quality,
+  });
   const blurredImageSrc = config.generateUrl({
-    url: cacheProxy,
+    url: config.cacheProxyUrl,
     src: props.src,
     width: 500,
     blur: true,
   });
 
-  const { error } = useImage(props.src);
+  const { error } = useImage(imageSrc);
 
   const srcSet = useMemo(() => {
-    return generateSrcSet(props.src, config.generateUrl);
-  }, [props.src, config.generateUrl]);
+    return generateSrcSet(props.src, config.cacheProxyUrl, config.generateUrl);
+  }, [props.src, config.cacheProxyUrl, config.generateUrl]);
 
   const handleMount = () => {
     if (!imageRef.current) return;

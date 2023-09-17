@@ -4,11 +4,13 @@ import { generateUrl as generateUrlIpx } from "./providers/ipx";
 
 export const defaultConfig: IImageCacheProviderConfig = {
   provider: "micro-image",
+  cacheProxyUrl: "http://localhost:4000/cache",
 };
 
 export interface IImageCacheProviderConfig {
   // TODO: maybe support cloudinary, imgix, anything else?
   provider: "micro-image" | "ipx";
+  cacheProxyUrl: string;
 }
 
 const ImageCacheContext = React.createContext<IImageCacheProviderConfig | null>(
@@ -24,6 +26,7 @@ export function ImageCacheProvider(config: ImageCacheProviderProps) {
     <ImageCacheContext.Provider
       value={{
         provider: config.provider || defaultConfig.provider,
+        cacheProxyUrl: config.cacheProxyUrl || defaultConfig.cacheProxyUrl,
       }}
     >
       {config.children}
@@ -36,7 +39,7 @@ function getGeneralUrlFunction(provider: "micro-image" | "ipx") {
     case "ipx":
       return generateUrlIpx;
     case "micro-image":
-      default:
+    default:
       return generateUrlMicroImage;
   }
 }
