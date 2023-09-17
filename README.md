@@ -12,6 +12,10 @@ This project is a multi-package with 2 main components:
 - Providing components for various front-end frameworks.
 - Providing the image proxy as a service
 
+## Usage
+
+Coming soon :)
+
 ### Apps and Packages
 
 - `cache`: image proxy powered by [Fastify](https://fastify.dev/)
