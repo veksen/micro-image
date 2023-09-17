@@ -4,8 +4,13 @@
 # micro-image
 
 This project is a multi-package with 2 main components:
-- An image proxy, meant to cache and compress images
+- A self-hosted image proxy, meant to cache and compress images
 - An image component (currently for React), that uses an image proxy to render the correctly
+
+## Future plans
+- Supporting (already partly implemented) multiple image proxy providers, like ipx (already supported), imgproxy, cloudinary.
+- Providing components for various front-end frameworks.
+- Providing the image proxy as a service
 
 ### Apps and Packages
 
