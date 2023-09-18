@@ -1,3 +1,4 @@
+import "dotenv/config";
 import http from "http";
 import https from "https";
 import Fastify, { FastifyRequest } from "fastify";
@@ -132,7 +133,7 @@ fastify.get("/cache", async (request: CacheRequest, reply) => {
   return imageBufferToUse;
 });
 
-fastify.listen({ port: 4000 }, (err, address) => {
+fastify.listen({ port: Number(process.env.PORT) || 4000 }, (err, address) => {
   if (err) throw err;
   console.log(`Server is now listening on ${address}`);
 });
