@@ -2,7 +2,10 @@ function toArrayBuffer(buffer: Buffer): ArrayBuffer {
   const arrayBuffer = new ArrayBuffer(buffer.length);
   const bytes = new Uint8Array(arrayBuffer);
   for (let i = 0; i < buffer.length; ++i) {
-    bytes[i] = buffer[i];
+    const byte = buffer[i];
+    if (byte !== undefined) {
+      bytes[i] = byte;
+    }
   }
   return arrayBuffer;
 }

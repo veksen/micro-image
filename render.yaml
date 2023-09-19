@@ -4,8 +4,8 @@ services:
     runtime: node
     repo: https://github.com/veksen/micro-image.git
     plan: free
-    buildCommand: yarn workspace micro-image-cache install
-    startCommand: yarn workspace micro-image-cache dev # temporary
+    buildCommand: yarn workspace micro-image-cache install; yarn workspace micro-image-cache build
+    startCommand: yarn workspace micro-image-cache start
 
   # A static site
   - type: web
