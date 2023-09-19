@@ -12,5 +12,5 @@ services:
     name: docs
     runtime: node
     plan: free
-    buildCommand: yarn workspace docs install; yarn workspace docs build
-    startCommand: yarn workspace cache docs start
+    buildCommand: yarn workspace @micro-image/docs install; yarn workspace @micro-image/docs build
+    startCommand: yarn workspace @micro-image/docs start
