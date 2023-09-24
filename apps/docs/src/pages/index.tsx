@@ -8,15 +8,15 @@ export default function Docs() {
       <div style={{ maxWidth: "800px" }}>
         <ImageCacheProvider
           provider="micro-image"
-          cacheProxyUrl="https://micro-image-cache.onrender.com/cache"
+          cacheProxyUrl={process.env.NEXT_PUBLIC_IMAGE_PROXY_URL}
         >
           <h2>Local image using micro-image proxy</h2>
           <p>
-            Using `https://docs-tovg.onrender.com/sniffa.gif`, meaning hosted inside Next.js
+            Using `${process.env.NEXT_PUBLIC_DOCS_URL}/sniffa.gif`, meaning hosted inside Next.js
             `/public` folder:
           </p>
           <Image
-            src="https://docs-tovg.onrender.com/sniffa.gif"
+            src={`${process.env.NEXT_PUBLIC_DOCS_URL}/sniffa.gif`}
             width={800}
             height={500}
             alt=""

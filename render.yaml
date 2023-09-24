@@ -20,3 +20,7 @@ services:
     envVars:
       - key: PORT
         value: 10000
+      - key: NEXT_PUBLIC_DOCS_URL
+        value: https://docs-tovg.onrender.com
+      - key: NEXT_PUBLIC_IMAGE_PROXY_URL
+        value: https://micro-image-cache.onrender.com/cache
