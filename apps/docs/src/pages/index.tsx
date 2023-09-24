@@ -24,9 +24,9 @@ export default function Docs() {
           />
 
           <h2>Remote image using micro-image proxy</h2>
-          <p>Using `https://picsum.photos/1500/900`:</p>
+          <p>Using `https://picsum.photos/id/66/1500/900`:</p>
           <Image
-            src="https://picsum.photos/1500/900"
+            src="https://picsum.photos/id/66/1500/900"
             width={800}
             height={500}
             alt=""
