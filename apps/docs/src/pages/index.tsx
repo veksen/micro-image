@@ -12,11 +12,11 @@ export default function Docs() {
         >
           <h2>Local image using micro-image proxy</h2>
           <p>
-            Using `http://localhost:3002/sniffa.gif`, meaning hosted inside Next.js `/public`
-            folder:
+            Using `https://docs-tovg.onrender.com/sniffa.gif`, meaning hosted inside Next.js
+            `/public` folder:
           </p>
           <Image
-            src="http://localhost:3002/sniffa.gif"
+            src="https://docs-tovg.onrender.com/sniffa.gif"
             width={800}
             height={500}
             alt=""
