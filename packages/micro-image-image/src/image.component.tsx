@@ -59,42 +59,36 @@ function Image(props: IImageProps): JSX.Element {
     return generateSrcSet(props.src, config.cacheProxyUrl, config.generateUrl);
   }, [props.src, config.cacheProxyUrl, config.generateUrl]);
 
-  const handleMount = () => {
-    if (!imageRef.current) return;
-    if (typeof window === "undefined") return;
-
-    observerRef.current = new ResizeObserver(
-      ([entry]: ResizeObserverEntry[]) => {
-        requestAnimationFrame(() => {
-          const { width } = entry.contentRect;
-          if (!imageRef.current) return;
-
-          const imgEl = imageRef.current;
-          const widthToRender = Math.ceil(Math.floor(width) / 100) * 100;
-
-          if (imgEl.sizes !== `${widthToRender}px`) {
-            imgEl.sizes = `${widthToRender}px`;
-          }
-
-          if (imgEl.srcset !== srcSet) {
-            imgEl.srcset = srcSet;
-          }
-        });
-      }
-    );
-
-    observerRef.current.observe(imageRef.current);
-  };
-
   useEffect(() => {
     if (!imageRef.current) return;
 
-    handleMount();
+    if (!imageRef.current) return;
+    if (typeof window === "undefined") return;
+
+    observerRef.current = new ResizeObserver(([entry]: ResizeObserverEntry[]) => {
+      requestAnimationFrame(() => {
+        const { width } = entry.contentRect;
+        if (!imageRef.current) return;
+
+        const imgEl = imageRef.current;
+        const widthToRender = Math.ceil(Math.floor(width) / 100) * 100;
+
+        if (imgEl.sizes !== `${widthToRender}px`) {
+          imgEl.sizes = `${widthToRender}px`;
+        }
+
+        if (imgEl.srcset !== srcSet) {
+          imgEl.srcset = srcSet;
+        }
+      });
+    });
+
+    observerRef.current.observe(imageRef.current);
 
     return () => {
       observerRef.current?.disconnect();
     };
-  }, []);
+  }, [srcSet]);
 
   return (
     <div
