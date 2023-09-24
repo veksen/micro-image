@@ -7,6 +7,11 @@
   "access": "public",
   "updateInternalDependencies": "patch",
   "baseBranch": "main",
-  "ignore": ["@micro-image/docs"],
+  "ignore": [
+    "micro-image-cache",
+    "@micro-image/docs",
+    "@micro-image/tsconfig",
+    "eslint-config-micro-image"
+  ],
   "privatePackages": { "version": true, "tag": true }
 }
