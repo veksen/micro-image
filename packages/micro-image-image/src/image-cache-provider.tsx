@@ -51,5 +51,5 @@ export function useImageCacheConfig() {
     return { ...defaultConfig, generateUrl: getGeneralUrlFunction(defaultConfig.provider) };
   }
 
-  return { ...config, generateUrl: getGeneralUrlFunction(defaultConfig.provider) };
+  return { ...config, generateUrl: getGeneralUrlFunction(config.provider) };
 }
