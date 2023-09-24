@@ -12,7 +12,7 @@ export default function Docs() {
         >
           <h2>Local image using micro-image proxy</h2>
           <p>
-            Using `${process.env.NEXT_PUBLIC_DOCS_URL}/sniffa.gif`, meaning hosted inside Next.js
+            Using `{process.env.NEXT_PUBLIC_DOCS_URL}/sniffa.gif`, meaning hosted inside Next.js
             `/public` folder:
           </p>
           <Image
