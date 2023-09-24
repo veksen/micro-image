@@ -1,6 +1,6 @@
 # @micro-image/image
 
-This is an image component for React meant to consume an image proxy, currently supporting two: [our own, @micro-image/proxy-image](https://github.com/veksen/micro-image), and [ipx](https://github.com/unjs/ipx), for the time being. Use a single, high-quality image, this component will only load the appropriate size.
+This is an image component for React meant to consume an image proxy, currently supporting two: our own, [@micro-image/proxy-image](https://github.com/veksen/micro-image), and [ipx](https://github.com/unjs/ipx), for the time being. Use a single, high-quality image, this component will only load the appropriate size.
 
 ## Install
 
