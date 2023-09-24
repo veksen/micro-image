@@ -6,6 +6,9 @@ services:
     plan: free
     buildCommand: yarn install; yarn build
     startCommand: yarn workspace micro-image-cache start
+    envVars:
+      - key: PORT
+        value: 9999
 
   # A static site
   - type: web
@@ -14,3 +17,6 @@ services:
     plan: free
     buildCommand: yarn install; yarn build
     startCommand: yarn workspace @micro-image/docs start
+    envVars:
+      - key: PORT
+        value: 10000
