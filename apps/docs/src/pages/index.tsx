@@ -8,7 +8,7 @@ export default function Docs() {
       <div style={{ maxWidth: "800px" }}>
         <ImageCacheProvider
           provider="micro-image"
-          cacheProxyUrl="https://micro-image-cache.onrender.com"
+          cacheProxyUrl="https://micro-image-cache.onrender.com/cache"
         >
           <h2>Local image using micro-image proxy</h2>
           <p>
