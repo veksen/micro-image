@@ -4,4 +4,5 @@ export interface IProviderOptions {
   width?: number;
   quality?: number;
   format?: string;
+  blur?: number;
 }

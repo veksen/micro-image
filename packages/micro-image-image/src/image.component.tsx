@@ -6,17 +6,26 @@ import { IProviderOptions } from "./providers/base";
 // TODO: remove hardcode
 const quality = 75;
 
-const generateSrcSet = (
-  baseSrc: string,
-  cacheProxyUrl: string,
-  generator: (options: IProviderOptions) => string
-) => {
+interface GenerateSrcSetOptions {
+  baseSrc: string;
+  cacheProxyUrl: string;
+  generator: (options: IProviderOptions) => string;
+  defaultGeneratorOptions?: Partial<IProviderOptions>;
+}
+
+const generateSrcSet = ({
+  baseSrc,
+  cacheProxyUrl,
+  generator,
+  defaultGeneratorOptions,
+}: GenerateSrcSetOptions) => {
   return Array.from({ length: 20 })
     .map((_, index) => index)
     .slice(1)
     .map((index) => {
       const width = index * 100;
       const url = generator({
+        ...defaultGeneratorOptions,
         url: cacheProxyUrl,
         src: baseSrc,
         width: width,
@@ -27,37 +36,59 @@ const generateSrcSet = (
     .join(", ");
 };
 
-export interface IImageProps {
+export interface IImageProps<GeneratorOptions extends IProviderOptions> {
   src: string;
   width: number;
   height: number;
   alt?: string;
   objectFit?: "none" | "cover" | "contain";
+  generatorOptions?: Partial<GeneratorOptions>;
 }
 
-function Image(props: IImageProps): JSX.Element {
+function Image<GeneratorOptions extends IProviderOptions = IProviderOptions>(
+  props: IImageProps<GeneratorOptions>
+): JSX.Element {
   const config = useImageCacheConfig();
 
   const imageRef = useRef<HTMLImageElement | null>(null);
   const observerRef = useRef<ResizeObserver | null>(null);
 
   const imageSrc = config.generateUrl({
+    ...config.defaultGeneratorOptions,
+    ...props.generatorOptions,
     url: config.cacheProxyUrl,
     src: props.src,
     quality: quality,
   });
+
   const blurredImageSrc = config.generateUrl({
+    ...config.defaultGeneratorOptions,
+    ...props.generatorOptions,
     url: config.cacheProxyUrl,
     src: props.src,
     width: 500,
-    blur: true,
+    blur: 5,
   });
 
   const { error } = useImage(imageSrc);
 
   const srcSet = useMemo(() => {
-    return generateSrcSet(props.src, config.cacheProxyUrl, config.generateUrl);
-  }, [props.src, config.cacheProxyUrl, config.generateUrl]);
+    return generateSrcSet({
+      baseSrc: props.src,
+      cacheProxyUrl: config.cacheProxyUrl,
+      generator: config.generateUrl,
+      defaultGeneratorOptions: {
+        ...config.defaultGeneratorOptions,
+        ...props.generatorOptions,
+      },
+    });
+  }, [
+    props.src,
+    props.generatorOptions,
+    config.cacheProxyUrl,
+    config.generateUrl,
+    config.defaultGeneratorOptions,
+  ]);
 
   useEffect(() => {
     if (!imageRef.current) return;

@@ -1,14 +1,7 @@
 import { IProviderOptions } from "./base";
 
 // ipx implementation
-interface IPXOptions extends IProviderOptions {
-  url: string;
-  src: string;
-  width?: number;
-  quality?: number;
-  format?: string;
-  blur?: boolean;
-}
+export interface IPXOptions extends IProviderOptions {}
 
 const getKeys = <T extends object>(obj: T) => Object.keys(obj) as Array<keyof T>;
 

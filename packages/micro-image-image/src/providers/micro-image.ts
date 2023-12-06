@@ -1,14 +1,7 @@
 import { IProviderOptions } from "./base";
 
 // micro-image implementation
-interface MicroImageOptions extends IProviderOptions {
-  url: string;
-  src: string;
-  width?: number;
-  quality?: number;
-  format?: string;
-  blur?: boolean;
-}
+export interface MicroImageOptions extends IProviderOptions {}
 
 const getKeys = <T extends object>(obj: T) => Object.keys(obj) as Array<keyof T>;
 
@@ -19,7 +12,7 @@ export function generateUrl(options: MicroImageOptions) {
     width: options.width,
     format: options.format,
     quality: options.quality,
-    blur: options.blur,
+    blur: Boolean(options.blur),
   };
 
   const queryParams = getKeys(params)
