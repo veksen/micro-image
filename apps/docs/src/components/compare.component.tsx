@@ -1,0 +1,112 @@
+import React from "react";
+
+interface IDocsImageWrapperProps {
+  children: React.ReactNode;
+  originalSrc: string;
+}
+
+interface IMetaValues {
+  src: string;
+  contentLength: number;
+}
+
+function getReadableFileSizeString(bytes: number) {
+  const byteUnits = [" kB", " MB", " GB", " TB", "PB", "EB", "ZB", "YB"];
+  let i = -1;
+
+  do {
+    bytes /= 1024;
+    i++;
+  } while (bytes > 1024);
+
+  return Math.max(bytes, 0.1).toFixed(1) + byteUnits[i];
+}
+
+export default function Compare(props: IDocsImageWrapperProps) {
+  const ref = React.useRef<HTMLDivElement>(null);
+
+  const [original, setOriginal] = React.useState<IMetaValues>();
+  const [processed, setProcessed] = React.useState<IMetaValues>();
+
+  React.useEffect(() => {
+    if (!ref.current) {
+      return;
+    }
+
+    const image = ref.current.querySelector("img");
+
+    if (!image) {
+      return;
+    }
+
+    image.onload = () => {
+      const params = new URLSearchParams({
+        originalSrc: props.originalSrc,
+        currentSrc: image.currentSrc,
+      });
+      fetch("/api/meta?" + params)
+        .then((res) => res.json())
+        .then((data) => {
+          setOriginal(data.original);
+          setProcessed(data.processed);
+        });
+    };
+  }, [props.originalSrc]);
+
+  const diff = React.useMemo(() => {
+    if (!processed || !original) {
+      return undefined;
+    }
+
+    return processed.contentLength / original.contentLength;
+  }, [processed, original]);
+
+  return (
+    <div ref={ref} style={{ display: "flex", gap: "8px" }}>
+      <CompareImage
+        title="processed"
+        src={processed?.src}
+        contentLength={processed?.contentLength}
+        diff={diff}
+      >
+        {props.children}
+      </CompareImage>
+      <CompareImage title="original" src={original?.src} contentLength={original?.contentLength}>
+        <img src={props.originalSrc} style={{ width: "100%" }} />
+      </CompareImage>
+    </div>
+  );
+}
+
+interface ICompareImage {
+  title: string;
+  children: React.ReactNode;
+  src?: string;
+  contentLength?: number;
+  diff?: number;
+}
+
+function CompareImage(props: ICompareImage) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: "8px", width: "50%" }}>
+      <h2 style={{ margin: 0 }}>{props.title}</h2>
+      <div>{props.children}</div>
+      <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+        {props.contentLength ? (
+          <>
+            <div style={{ display: "flex", gap: "4px", fontWeight: 700 }}>
+              <span>{getReadableFileSizeString(props.contentLength)}</span>
+              {props.diff && props.diff < 1 && (
+                <span>({((1 - props.diff) * 100).toFixed(1)}% smaller)</span>
+              )}
+              {props.diff && props.diff === 1 && <span>(Not compressed)</span>}
+            </div>
+            <div style={{ wordWrap: "break-word" }}>{props.src}</div>
+          </>
+        ) : (
+          "loading..."
+        )}
+      </div>
+    </div>
+  );
+}
