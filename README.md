@@ -29,8 +29,8 @@ Each package and app is 100% [TypeScript](https://www.typescriptlang.org/).
 
 ### Useful commands
 
-- `yarn build` - Build all packages, the image proxy and docs site
-- `yarn dev` - Develop all packages, the image proxy and the docs site
-- `yarn lint` - Lint all packages
-- `yarn changeset` - Generate a changeset
-- `yarn clean` - Clean up all `node_modules` and `dist` folders (runs each package's clean script)
+- `npm run build` - Build all packages, the image proxy and docs site
+- `npm run dev` - Develop all packages, the image proxy and the docs site
+- `npm run lint` - Lint all packages
+- `npm run changeset` - Generate a changeset
+- `npm run clean` - Clean up all `node_modules` and `dist` folders (runs each package's clean script)
