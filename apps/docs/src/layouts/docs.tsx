@@ -40,7 +40,7 @@ export default function Layout({ children }: React.PropsWithChildren) {
         <Link href="/motivation">Motivation</Link>
       </aside>
       <main className="flex flex-col grow shrink items-center max-w-[800px] p-4 mx-auto">
-        <div className="flex flex-col items-start gap-8 max-w-[100%]">{children}</div>
+        <div className="flex flex-col items-stretch gap-8 max-w-[100%]">{children}</div>
       </main>
     </div>
   );
