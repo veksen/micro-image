@@ -3,7 +3,7 @@ services:
     name: micro-image-cache
     runtime: node
     repo: https://github.com/veksen/micro-image.git
-    plan: free
+    plan: standard
     buildCommand: yarn install; yarn build
     startCommand: yarn workspace micro-image-cache start
     envVars:
