@@ -86,6 +86,8 @@ fastify.get("/cache", async (request: CacheRequest, reply) => {
     blur: request.query.blur === "true",
   });
   const cached = fromCache(id);
+  const cacheControl =
+    "public, max-age=2592000, stale-while-revalidate=60, stale-if-error=43200, immutable";
 
   // found in cache, use it and return
   if (cached) {
@@ -98,6 +100,7 @@ fastify.get("/cache", async (request: CacheRequest, reply) => {
   // not supported, return as is
   if (!isSupported(image.headers["content-type"])) {
     reply.type(image.headers["content-type"]).code(200);
+    reply.header("Cache-Control", cacheControl);
     return image.data;
   }
 
@@ -111,6 +114,7 @@ fastify.get("/cache", async (request: CacheRequest, reply) => {
     });
 
     reply.type(image.headers["content-type"]).code(200);
+    reply.header("Cache-Control", cacheControl);
     return imageBuffer;
   }
 
@@ -130,6 +134,7 @@ fastify.get("/cache", async (request: CacheRequest, reply) => {
   });
 
   reply.type(image.headers["content-type"]).code(200);
+  reply.header("Cache-Control", cacheControl);
   return imageBufferToUse;
 });
 
