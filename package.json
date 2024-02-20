@@ -15,7 +15,7 @@
     "dotenv-cli": "7.3.0",
     "eslint": "^8.56.0",
     "eslint-config-micro-image": "*",
-    "prettier": "^3.0.3",
+    "prettier": "^3.2.5",
     "turbo": "latest"
   },
   "packageManager": "yarn@1.22.19",
