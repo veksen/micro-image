@@ -62,7 +62,7 @@ export default function Compare(props: IDocsImageWrapperProps) {
   }, [processed, original]);
 
   return (
-    <div ref={ref} style={{ display: "flex", gap: "8px" }}>
+    <div ref={ref} className="flex gap-2">
       <CompareImage
         title="processed"
         src={processed?.src}
@@ -72,7 +72,7 @@ export default function Compare(props: IDocsImageWrapperProps) {
         {props.children}
       </CompareImage>
       <CompareImage title="original" src={original?.src} contentLength={original?.contentLength}>
-        <img src={props.originalSrc} style={{ width: "100%" }} />
+        <img src={props.originalSrc} className="w-[100%]" />
       </CompareImage>
     </div>
   );
@@ -88,20 +88,20 @@ interface ICompareImage {
 
 function CompareImage(props: ICompareImage) {
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "8px", width: "50%" }}>
-      <h2 style={{ margin: 0 }}>{props.title}</h2>
+    <div className="flex flex-col gap-2 w-[50%]">
+      <h2 className="text-bold">{props.title}</h2>
       <div>{props.children}</div>
-      <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+      <div className="flex flex-col gap-1">
         {props.contentLength ? (
           <>
-            <div style={{ display: "flex", gap: "4px", fontWeight: 700 }}>
+            <div className="flex gap-1 font-bold">
               <span>{getReadableFileSizeString(props.contentLength)}</span>
               {props.diff && props.diff < 1 && (
                 <span>({((1 - props.diff) * 100).toFixed(1)}% smaller)</span>
               )}
               {props.diff && props.diff === 1 && <span>(Not compressed)</span>}
             </div>
-            <div style={{ wordWrap: "break-word" }}>{props.src}</div>
+            <div className="text-wrap">{props.src}</div>
           </>
         ) : (
           "loading..."
