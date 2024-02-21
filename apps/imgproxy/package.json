@@ -1,0 +1,8 @@
+{
+  "name": "imgproxy",
+  "version": "1.0.0",
+  "main": "dist/index.js",
+  "repository": "git@github.com:veksen/micro-image-cache.git",
+  "author": "Jean-Philippe Sirois <jp@veksen.net>",
+  "license": "MIT"
+}
