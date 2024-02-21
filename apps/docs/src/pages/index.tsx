@@ -169,6 +169,23 @@ export default function DocsIndex() {
         </section>
       </ImageCacheProvider>
 
+      <ImageCacheProvider provider="imgproxy" cacheProxyUrl={process.env.NEXT_PUBLIC_IMGPROXY_URL}>
+        <section>
+          <h2 className="text-lg font-bold">Remote image using imgproxy</h2>
+          <p>Using `https://picsum.photos/id/66/1500/900`:</p>
+
+          <Compare originalSrc="https://picsum.photos/id/66/1500/900">
+            <Image
+              src="https://picsum.photos/id/66/1500/900"
+              width={300}
+              height={200}
+              alt=""
+              objectFit="cover"
+            />
+          </Compare>
+        </section>
+      </ImageCacheProvider>
+
       <section className="max-w-[100%]">
         <h2 className="text-lg font-bold">(TODO): Image from ipx</h2>
         <p>Using `bliss.jpg`, stored inside ipx assets:</p>

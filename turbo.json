@@ -1,7 +1,12 @@
 {
   "$schema": "https://turbo.build/schema.json",
   "globalDotEnv": [".env"],
-  "globalEnv": ["PORT", "NEXT_PUBLIC_DOCS_URL", "NEXT_PUBLIC_IMAGE_PROXY_URL"],
+  "globalEnv": [
+    "PORT",
+    "NEXT_PUBLIC_DOCS_URL",
+    "NEXT_PUBLIC_IMAGE_PROXY_URL",
+    "NEXT_PUBLIC_IMGPROXY_URL"
+  ],
   "pipeline": {
     "build": {
       "outputs": ["dist/**", ".next/**", "!.next/cache/**"],
