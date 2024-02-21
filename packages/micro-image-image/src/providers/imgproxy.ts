@@ -21,7 +21,7 @@ export function generateUrl(options: ImgProxyOptions) {
     .join("/");
 
   const encodedSourceUrl = btoa(options.src);
-  const format = options.format || "png";
+  const format = options.format || "jpg";
 
   return `${options.url}/${processingOptions}/${encodedSourceUrl}.${format}`;
 }
