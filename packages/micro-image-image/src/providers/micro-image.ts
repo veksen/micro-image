@@ -12,7 +12,9 @@ export function generateUrl(options: MicroImageOptions) {
     width: options.width,
     format: options.format,
     quality: options.quality,
-    blur: Boolean(options.blur),
+    // The radius, not a flag. Coercing with Boolean() both discarded the radius
+    // and emitted blur=false on every url that never asked for blur.
+    blur: options.blur,
   };
 
   const queryParams = getKeys(params)

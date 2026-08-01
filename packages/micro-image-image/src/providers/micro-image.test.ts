@@ -31,21 +31,19 @@ describe("micro-image generateUrl — current behaviour", () => {
     expect(url).not.toContain("format=");
   });
 
-  it("emits blur=false on every url that does not ask for blur [BUG-5]", () => {
-    // Boolean(undefined) is false, not undefined, so blur always survives the
-    // `!== undefined` filter and every generated url carries it
+  it("emits nothing but the image param when nothing else is asked for [BUG-5]", () => {
     expect(generateUrl({ url: URL_BASE, src: SRC })).toBe(
-      `${URL_BASE}?image=${encodeURIComponent(SRC)}&blur=false`
+      `${URL_BASE}?image=${encodeURIComponent(SRC)}`
     );
   });
 
-  it("collapses a numeric blur radius to the string 'true' [BUG-2]", () => {
+  it("emits the blur radius rather than a flag [BUG-2]", () => {
     const five = generateUrl({ url: URL_BASE, src: SRC, blur: 5 });
     const forty = generateUrl({ url: URL_BASE, src: SRC, blur: 40 });
 
-    expect(five).toContain("blur=true");
-    // the radius is gone before the request is even made
-    expect(five).toBe(forty);
+    expect(five).toContain("blur=5");
+    expect(forty).toContain("blur=40");
+    expect(five).not.toBe(forty);
   });
 
   it("produces a stable url for identical options", () => {
@@ -57,11 +55,11 @@ describe("micro-image generateUrl — current behaviour", () => {
 });
 
 describe("bug ledger", () => {
-  it.fails("BUG-5: blur should be absent from the url when not requested", () => {
+  it("BUG-5: blur should be absent from the url when not requested", () => {
     expect(generateUrl({ url: URL_BASE, src: SRC })).not.toContain("blur");
   });
 
-  it.fails("BUG-2: the blur radius should survive into the url", () => {
+  it("BUG-2: the blur radius should survive into the url", () => {
     const five = generateUrl({ url: URL_BASE, src: SRC, blur: 5 });
     const forty = generateUrl({ url: URL_BASE, src: SRC, blur: 40 });
 

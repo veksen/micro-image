@@ -84,7 +84,7 @@ describe("Image — initial paint has no srcset [BUG-10]", () => {
     const { img } = renderImage();
 
     expect(img()!.getAttribute("src")).toBe(
-      `${PROXY}?image=${encodeURIComponent(SRC)}&width=500&blur=true`
+      `${PROXY}?image=${encodeURIComponent(SRC)}&width=500&blur=5`
     );
   });
 
@@ -146,7 +146,7 @@ describe("Image — the discarded preflight fetch [BUG-1]", () => {
     // variant the proxy will produce — and only `error` is read from it
     expect(FakeImage.instances).toHaveLength(1);
     expect(FakeImage.instances[0]!.src).toBe(
-      `${PROXY}?image=${encodeURIComponent(SRC)}&quality=75&blur=false`
+      `${PROXY}?image=${encodeURIComponent(SRC)}&quality=75`
     );
   });
 
@@ -214,10 +214,9 @@ describe("bug ledger", () => {
     }
   });
 
-  it.fails("BUG-2: the placeholder should request the blur radius the component passes", () => {
+  it("BUG-2: the placeholder should request the blur radius the component passes", () => {
     const { img } = renderImage();
 
-    // the component passes blur: 5, which is flattened to blur=true
     expect(img()!.getAttribute("src")).toContain("blur=5");
   });
 });

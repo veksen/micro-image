@@ -197,39 +197,83 @@ describe("GET /cache — unsupported mime [BUG-21]", () => {
   });
 });
 
-describe("GET /cache — dead parameters [BUG-3, BUG-4]", () => {
-  it("keys on ?quality= but still ignores it when encoding", async () => {
+describe("GET /cache — transform parameters [BUG-3, BUG-4, BUG-2]", () => {
+  it("keys on ?quality= and applies it", async () => {
     const jpeg = await makeJpeg({ width: 400, height: 300, quality: 80 });
     origin = await startOrigin({ "/cat.jpg": { body: jpeg, contentType: "image/jpeg" } });
 
     const a = await get({ image: `${origin.url}/cat.jpg`, width: "200", quality: "30" });
     const b = await get({ image: `${origin.url}/cat.jpg`, width: "200", quality: "90" });
 
-    // BUG-17 is fixed, so the two qualities no longer share an entry. BUG-3 is
-    // not, so the encoder still ignores the value and both fetches produce
-    // identical bytes — wasteful, but no longer cache poisoning.
     expect(origin.hits["/cat.jpg"]).toBe(2);
-    expect(Buffer.compare(a.rawPayload, b.rawPayload)).toBe(0);
+    expect(Buffer.compare(a.rawPayload, b.rawPayload)).not.toBe(0);
   });
 
-  it("ignores ?format= and always echoes the origin mime", async () => {
+  it("distinguishes blur radii rather than reading a flag", async () => {
     const jpeg = await makeJpeg({ width: 400, height: 300, quality: 80 });
     origin = await startOrigin({ "/cat.jpg": { body: jpeg, contentType: "image/jpeg" } });
 
-    const res = await get({ image: `${origin.url}/cat.jpg`, width: "200", format: "webp" });
+    const five = await get({ image: `${origin.url}/cat.jpg`, width: "200", blur: "5" });
+    const forty = await get({ image: `${origin.url}/cat.jpg`, width: "200", blur: "40" });
 
+    expect(Buffer.compare(five.rawPayload, forty.rawPayload)).not.toBe(0);
+  });
+
+  it("still honours the legacy blur=true the published client sends", async () => {
+    const jpeg = await makeJpeg({ width: 400, height: 300, quality: 80 });
+    origin = await startOrigin({ "/cat.jpg": { body: jpeg, contentType: "image/jpeg" } });
+
+    const legacy = await get({ image: `${origin.url}/cat.jpg`, width: "200", blur: "true" });
+    const explicit = await get({ image: `${origin.url}/cat.jpg`, width: "200", blur: "10" });
+
+    // blur=true has always meant radius 10, so it must keep meaning that
+    expect(Buffer.compare(legacy.rawPayload, explicit.rawPayload)).toBe(0);
+  });
+
+  it("rejects a format it cannot encode, before fetching anything", async () => {
+    const jpeg = await makeJpeg({ width: 400, height: 300, quality: 80 });
+    origin = await startOrigin({ "/cat.jpg": { body: jpeg, contentType: "image/jpeg" } });
+
+    const res = await get({ image: `${origin.url}/cat.jpg`, format: "bmp" });
+
+    expect(res.statusCode).toBe(400);
+    expect(origin.hits["/cat.jpg"]).toBeUndefined();
+  });
+
+  it("treats format=original as an explicit request for the source format", async () => {
+    const jpeg = await makeJpeg({ width: 400, height: 300, quality: 80 });
+    origin = await startOrigin({ "/cat.jpg": { body: jpeg, contentType: "image/jpeg" } });
+
+    const res = await get({ image: `${origin.url}/cat.jpg`, width: "200", format: "original" });
+
+    expect(res.statusCode).toBe(200);
     expect(res.headers["content-type"]).toContain("image/jpeg");
   });
 
-  it("ignores ?blur= radius and only reads the literal string 'true'", async () => {
+  it("serves a converted image from cache with the converted mime", async () => {
     const jpeg = await makeJpeg({ width: 400, height: 300, quality: 80 });
     origin = await startOrigin({ "/cat.jpg": { body: jpeg, contentType: "image/jpeg" } });
 
-    const blurred = await get({ image: `${origin.url}/cat.jpg`, width: "200", blur: "true" });
-    const numeric = await get({ image: `${origin.url}/cat.jpg`, width: "200", blur: "5" });
+    await get({ image: `${origin.url}/cat.jpg`, width: "200", format: "webp" });
+    const hit = await get({ image: `${origin.url}/cat.jpg`, width: "200", format: "webp" });
 
-    // blur=5 is not the string "true", so it takes the unblurred branch
-    expect(Buffer.compare(blurred.rawPayload, numeric.rawPayload)).not.toBe(0);
+    // the cache record stores the output mime, not the upstream one, or the
+    // second caller gets webp bytes labelled image/jpeg
+    expect(origin.hits["/cat.jpg"]).toBe(1);
+    expect(hit.headers["content-type"]).toContain("image/webp");
+  });
+
+  it("does not fall back to the smaller original when a format was requested", async () => {
+    // a tiny flat png converts to a webp that is larger than the source, which
+    // is exactly when getSmallestImage would have handed back png bytes
+    const png = await makePng({ width: 40, height: 40, content: "flat" });
+    origin = await startOrigin({ "/flat.png": { body: png, contentType: "image/png" } });
+
+    const res = await get({ image: `${origin.url}/flat.png`, format: "webp" });
+    const sharp = (await import("sharp")).default;
+
+    expect(res.headers["content-type"]).toContain("image/webp");
+    expect((await sharp(res.rawPayload).metadata()).format).toBe("webp");
   });
 });
 
@@ -395,7 +439,7 @@ describe("bug ledger", () => {
     expect(origin.hits["/cat.jpg"]).toBe(2);
   });
 
-  it.fails("BUG-3: ?quality= should change the output bytes", async () => {
+  it("BUG-3: ?quality= should change the output bytes", async () => {
     const jpeg = await makeJpeg({ width: 400, height: 300, quality: 80 });
     origin = await startOrigin({ "/cat.jpg": { body: jpeg, contentType: "image/jpeg" } });
 
@@ -406,7 +450,7 @@ describe("bug ledger", () => {
     expect(low.rawPayload.byteLength).toBeLessThan(high.rawPayload.byteLength);
   });
 
-  it.fails("BUG-4: ?format=webp should return a webp", async () => {
+  it("BUG-4: ?format=webp should return a webp", async () => {
     const jpeg = await makeJpeg({ width: 400, height: 300, quality: 80 });
     origin = await startOrigin({ "/cat.jpg": { body: jpeg, contentType: "image/jpeg" } });
 

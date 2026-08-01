@@ -46,31 +46,88 @@ function positiveNumber(value?: string): number | undefined {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
 }
 
+/** Encoder quality is a hint, so out-of-range values clamp rather than fail. */
+export const minQuality = 1;
+export const maxQuality = 100;
+
+function parseQuality(value?: string): number | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  const parsed = Number(value);
+
+  if (!Number.isFinite(parsed)) {
+    return undefined;
+  }
+
+  return Math.min(maxQuality, Math.max(minQuality, Math.round(parsed)));
+}
+
+/** sharp rejects a blur sigma outside this range. */
+const minBlur = 0.3;
+const maxBlur = 1000;
+
+function parseBlur(value?: string): number | undefined {
+  // The published client still sends the legacy boolean.
+  if (value === "true") {
+    return legacyBlurRadius;
+  }
+
+  const parsed = positiveNumber(value);
+
+  return parsed === undefined ? undefined : Math.min(maxBlur, Math.max(minBlur, parsed));
+}
+
 /**
  * Parses the query string once, so the cache key and the transform cannot
  * disagree about what was asked for. That disagreement was the actual defect
  * behind BUG-17: `buildId` includes any key handed to it, and the route only
  * ever handed it two.
+ *
+ * Values are normalised to what will actually be applied — clamped, rounded,
+ * lowercased — so two requests that differ only in a value the encoder would
+ * treat identically share one cache entry.
  */
 export function parseCacheOptions(query: CacheQuerystring): CacheOptions {
   return {
     width: positiveNumber(query.width),
-    quality: positiveNumber(query.quality),
-    format: query.format || undefined,
-    blur: query.blur === "true" ? legacyBlurRadius : positiveNumber(query.blur),
+    quality: parseQuality(query.quality),
+    format: query.format ? query.format.toLowerCase() : undefined,
+    blur: parseBlur(query.blur),
   };
 }
 
 export interface CompressOptions {
+  /** The mime to encode **to**, not the mime that came from upstream. */
   contentType?: string;
   width?: number;
-  blur?: boolean;
+  /** Blur sigma. Absent means no blur. */
+  blur?: number;
   quality?: number;
 }
 
 export const gifMime = "image/gif";
 
 export const supportedMimes = ["image/png", "image/webp", gifMime, "image/jpg", "image/jpeg"];
+
+/**
+ * Formats `?format=` accepts, mapped to the mime each produces.
+ *
+ * `auto` is deliberately absent. ADR 0004 reserves "the proxy decides" for
+ * `Accept`-header negotiation, so it should mean that when it lands rather
+ * than quietly meaning "source format" now.
+ */
+export const formatMimes: Record<string, string> = {
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  png: "image/png",
+  webp: "image/webp",
+  gif: gifMime,
+};
+
+/** An explicit request for whatever the source already is. */
+export const passthroughFormat = "original";
 
 export const cacheControl =
   "public, max-age=2592000, stale-while-revalidate=60, stale-if-error=43200, immutable";
@@ -79,31 +136,50 @@ export function isSupported(mime: string): boolean {
   return supportedMimes.includes(mime);
 }
 
+export function isSupportedFormat(format: string): boolean {
+  return format === passthroughFormat || format in formatMimes;
+}
+
+/**
+ * The mime the response will actually carry: the requested format when one was
+ * asked for, otherwise whatever came from upstream.
+ */
+export function resolveOutputMime(format: string | undefined, upstreamMime: string): string {
+  if (format === undefined || format === passthroughFormat) {
+    return upstreamMime;
+  }
+
+  return formatMimes[format] ?? upstreamMime;
+}
+
 export function imageFromMime(image: sharp.Sharp, mime?: string, quality?: number): sharp.Sharp {
+  const effectiveQuality = quality ?? 75;
+
   switch (mime) {
     case "image/png":
+      // png quality only bites with a palette, and forcing one would change the
+      // output of every png request. Left lossless.
       return image.png();
     case "image/webp":
-      return image.webp();
+      return image.webp({ quality: effectiveQuality });
     case "image/gif":
       return image.gif();
     case "image/jpg":
     case "image/jpeg":
     default:
-      return image.jpeg({ mozjpeg: true, quality: quality || 75 });
+      return image.jpeg({ mozjpeg: true, quality: effectiveQuality });
   }
 }
 
 export function compress(buffer: Buffer, options: CompressOptions): Promise<Buffer> {
-  // TODO: support webp, double check against animated png
   let sharpImage = sharp(buffer);
 
   if (options.width) {
-    sharpImage = sharpImage.resize({ width: options.width || 1000, withoutEnlargement: true });
+    sharpImage = sharpImage.resize({ width: options.width, withoutEnlargement: true });
   }
 
   if (options.blur) {
-    sharpImage = sharpImage.blur(10);
+    sharpImage = sharpImage.blur(options.blur);
   }
 
   const image = imageFromMime(sharpImage, options.contentType, options.quality);
@@ -147,6 +223,17 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
 
   fastify.get("/cache", async (request: CacheRequest, reply) => {
     const requested = parseCacheOptions(request.query);
+
+    // Refuse an unencodable format before doing any work, so a typo cannot mint
+    // a cache entry or cost an upstream fetch.
+    if (requested.format !== undefined && !isSupportedFormat(requested.format)) {
+      reply.code(400);
+      return {
+        error: `unsupported format "${requested.format}"`,
+        supported: [...Object.keys(formatMimes), passthroughFormat],
+      };
+    }
+
     const id = buildId(request.query.image, requested);
     const cached = fromCache(id);
 
@@ -190,27 +277,33 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
         return { contentType: upstreamContentType, body: imageBuffer };
       }
 
-      // compress image.
-      //
-      // The key now carries quality, format and the blur radius, but the
-      // transform still ignores them — honouring them is the follow-up this
-      // unblocks. Until then blur stays on the historical rule, so `blur=5`
-      // remains unblurred rather than silently picking up the hardcoded radius.
+      const outputMime = resolveOutputMime(requested.format, upstreamContentType);
+
       const compressedBuffer = await compress(imageBuffer, {
-        contentType: upstreamContentType,
+        contentType: outputMime,
         width: requested.width,
-        blur: request.query.blur === "true",
+        blur: requested.blur,
+        quality: requested.quality,
       });
 
-      // use the smallest between original and compressed
-      const imageBufferToUse = getSmallestImage(compressedBuffer, imageBuffer);
+      // Use the smallest of the two, but only when both are the same format.
+      // Handing back the original because it happens to be smaller would answer
+      // `?format=webp` with jpeg bytes labelled image/webp.
+      const converted = outputMime !== upstreamContentType;
+      const imageBufferToUse = converted
+        ? compressedBuffer
+        : getSmallestImage(compressedBuffer, imageBuffer);
+
+      // The original survives only on the un-converted path, so it is still the
+      // upstream mime; anything else is what we just encoded.
+      const servedMime = imageBufferToUse === imageBuffer ? upstreamContentType : outputMime;
 
       toCache(id, {
-        contentType: upstreamContentType,
+        contentType: servedMime,
         buffer: imageBufferToUse,
       });
 
-      return { contentType: upstreamContentType, body: imageBufferToUse };
+      return { contentType: servedMime, body: imageBufferToUse };
     });
 
     reply.type(result.contentType).code(200);
