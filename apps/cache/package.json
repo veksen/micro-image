@@ -11,7 +11,10 @@
     "dev": "ts-node-dev src/index.ts",
     "clean": "rm -rf .turbo && rm -rf node_modules && rm -rf dist",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "bench": "vitest bench --run",
+    "benchmark": "vite-node benchmark/proxy.bench.ts",
+    "benchmark:history": "vite-node benchmark/history.ts"
   },
   "dependencies": {
     "axios": "^1.6.7",

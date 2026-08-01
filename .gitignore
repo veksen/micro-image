@@ -14,3 +14,7 @@ public/dist
 
 # machine-local Claude Code settings
 .claude/settings.local.json
+
+# benchmark output
+apps/cache/benchmark/results.json
+apps/cache/benchmark/history.html

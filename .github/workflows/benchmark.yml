@@ -1,0 +1,85 @@
+name: Benchmark
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  # never cancel a main run: it is the one that records a history point
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: write
+
+jobs:
+  benchmark:
+    name: Benchmark
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # On a PR: measure and report, record nothing. Fails only if the
+      # benchmark cannot run. It never fails on the numbers, because runner
+      # timings are not a signal and today's byte counts describe behaviour we
+      # already know is broken.
+      - name: Proxy benchmark
+        if: github.event_name == 'pull_request'
+        run: npm run benchmark -w apps/cache
+        env:
+          BENCH_ITERATIONS: 5
+
+      # On main: measure and append one point to the committed history.
+      - name: Proxy benchmark and record history
+        if: github.event_name == 'push'
+        run: npm run benchmark -w apps/cache -- --append-history
+        env:
+          BENCH_ITERATIONS: 15
+
+      - name: Micro-benchmarks
+        run: |
+          npm run bench -w apps/cache
+          npm run bench -w packages/micro-image-image
+
+      # "[skip ci]" is load-bearing: without it this push retriggers the
+      # workflow, which appends another point, which pushes again.
+      - name: Commit history point
+        if: github.event_name == 'push'
+        run: |
+          if git diff --quiet -- apps/cache/benchmark/history.jsonl; then
+            echo "no new history point to commit"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add apps/cache/benchmark/history.jsonl
+          git commit -m "chore: record benchmark history point [skip ci]"
+          # another merge may have landed while this ran
+          for attempt in 1 2 3; do
+            git pull --rebase origin main && git push origin HEAD:main && exit 0
+            echo "push attempt $attempt failed, retrying"
+            sleep 5
+          done
+          exit 1
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results
+          path: |
+            apps/cache/benchmark/results.json
+            apps/cache/benchmark/history.jsonl
+          if-no-files-found: warn
