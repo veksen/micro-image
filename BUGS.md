@@ -140,7 +140,7 @@ Four defects not in the original report, numbered from 28 to avoid collision.
 | 13  | `/api/meta` mishandles a missing `content-length` (see correction)  | `__tests__/api-meta.test.ts`                                | yes                                                                |
 | 14  | `/api/meta` never responds to non-GET                               | `__tests__/api-meta.test.ts`                                | yes                                                                |
 | 15  | `Cache-Control` missing on every cache hit                          | `server.test.ts`                                            | yes                                                                |
-| 16  | unbounded in-memory cache                                           | `cache.test.ts`                                             | yes                                                                |
+| 16  | unbounded in-memory cache                                           | `cache.test.ts`                                             | **fixed** ([#6](https://github.com/veksen/micro-image/issues/6))   |
 | 17  | cache key omits quality / format / blur radius (see correction)     | `server.test.ts`, `cache.test.ts`                           | **fixed** ([#8](https://github.com/veksen/micro-image/issues/8))   |
 | 18  | `isAnimatedGif` runs unguarded on every mime (see correction)       | `is-animated-gif.test.ts`, `server.test.ts`                 | **fixed** ([#4](https://github.com/veksen/micro-image/issues/4))   |
 | 19  | `Buffer.from(data, "binary")` double-buffers                        | `server.test.ts` (fidelity only)                            | no — cost is perf, belongs in the benchmark                        |
