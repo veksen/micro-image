@@ -20,7 +20,9 @@ export interface CompressOptions {
   quality?: number;
 }
 
-export const supportedMimes = ["image/png", "image/webp", "image/gif", "image/jpg", "image/jpeg"];
+export const gifMime = "image/gif";
+
+export const supportedMimes = ["image/png", "image/webp", gifMime, "image/jpg", "image/jpeg"];
 
 export const cacheControl =
   "public, max-age=2592000, stale-while-revalidate=60, stale-if-error=43200, immutable";
@@ -125,8 +127,10 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
 
     const imageBuffer = Buffer.from(image.data, "binary");
 
-    // animated gif, return as is
-    if (isAnimatedGif(imageBuffer)) {
+    // animated gif, return as is. The mime guard matters: the animation probe
+    // reads fixed offsets that carry unrelated data in other formats, so
+    // running it on a non-gif is asking for a false positive.
+    if (image.headers["content-type"] === gifMime && isAnimatedGif(imageBuffer)) {
       toCache(id, {
         contentType: upstreamContentType,
         buffer: imageBuffer,
