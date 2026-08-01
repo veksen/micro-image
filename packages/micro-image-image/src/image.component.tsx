@@ -47,7 +47,7 @@ export interface IImageProps<GeneratorOptions extends IProviderOptions> {
 
 function Image<GeneratorOptions extends IProviderOptions = IProviderOptions>(
   props: IImageProps<GeneratorOptions>
-): JSX.Element {
+): React.JSX.Element {
   const config = useImageCacheConfig();
 
   const imageRef = useRef<HTMLImageElement | null>(null);

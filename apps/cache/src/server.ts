@@ -110,9 +110,15 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
 
     const image = await downloadImage(request.query.image);
 
+    // axios types response header values as `AxiosHeaderValue | undefined`; older
+    // typings resolved this to `string`. Cast rather than coerce so the runtime
+    // path is byte-for-byte what it was — including BUG-22, where an upstream
+    // content-type is relayed with no validation.
+    const upstreamContentType = image.headers["content-type"] as string;
+
     // not supported, return as is
-    if (!isSupported(image.headers["content-type"])) {
-      reply.type(image.headers["content-type"]).code(200);
+    if (!isSupported(upstreamContentType)) {
+      reply.type(upstreamContentType).code(200);
       reply.header("Cache-Control", cacheControl);
       return image.data;
     }
@@ -122,18 +128,18 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
     // animated gif, return as is
     if (isAnimatedGif(imageBuffer)) {
       toCache(id, {
-        contentType: image.headers["content-type"],
+        contentType: upstreamContentType,
         buffer: imageBuffer,
       });
 
-      reply.type(image.headers["content-type"]).code(200);
+      reply.type(upstreamContentType).code(200);
       reply.header("Cache-Control", cacheControl);
       return imageBuffer;
     }
 
     // compress image
     const compressedBuffer = await compress(imageBuffer, {
-      contentType: image.headers["content-type"],
+      contentType: upstreamContentType,
       width: Number(request.query.width),
       blur: request.query.blur === "true",
     });
@@ -142,11 +148,11 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
     const imageBufferToUse = getSmallestImage(compressedBuffer, imageBuffer);
 
     toCache(id, {
-      contentType: image.headers["content-type"],
+      contentType: upstreamContentType,
       buffer: imageBufferToUse,
     });
 
-    reply.type(image.headers["content-type"]).code(200);
+    reply.type(upstreamContentType).code(200);
     reply.header("Cache-Control", cacheControl);
     return imageBufferToUse;
   });

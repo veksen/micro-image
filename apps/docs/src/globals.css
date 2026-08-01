@@ -1,6 +1,15 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
+
+/*
+ * tailwindcss-radix-colors 2.x is a pure-CSS package for Tailwind 4 — there is
+ * no JS plugin to register any more. `all-colors-only.css` is the v4 equivalent
+ * of the old `{ disableSemantics: true }` option: it defines the raw
+ * `--color-<hue>-<step>` scales without the semantic `bg-*-app`-style utilities.
+ */
+@import "tailwindcss-radix-colors/dist/all-colors-only.css";
+
+/* v3 `darkMode: "class"`; the root <Html> carries the `dark` class. */
+@custom-variant dark (&:where(.dark, .dark *));
 
 #__next {
   @apply min-h-screen flex flex-col;

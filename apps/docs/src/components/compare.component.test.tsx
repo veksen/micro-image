@@ -9,7 +9,12 @@ import Compare from "./compare.component";
 const ORIGINAL = "https://example.com/cat.jpg";
 
 function stubMetaFetch(body: unknown) {
-  const fetchMock = vi.fn(async () => ({ json: async () => body }));
+  // The implementation ignores its arguments, but `fetch` is really called with
+  // a URL and the call-args assertions below read it. Declare the parameters so
+  // `mock.calls` is typed as what is actually passed, not as an empty tuple.
+  const fetchMock = vi.fn(async (..._args: Parameters<typeof fetch>) => ({
+    json: async () => body,
+  }));
   vi.stubGlobal("fetch", fetchMock);
   return fetchMock;
 }

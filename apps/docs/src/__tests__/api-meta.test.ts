@@ -35,7 +35,7 @@ function makeReq(method: string, query: Record<string, string> = {}): NextApiReq
 /** Stubs fetch so each url reports the given content-length (null = absent). */
 function stubFetch(lengths: Record<string, string | null>) {
   const fetchMock = vi.fn(async (url: string) => ({
-    headers: { get: (name: string) => (name === "content-length" ? lengths[url] ?? null : null) },
+    headers: { get: (name: string) => (name === "content-length" ? (lengths[url] ?? null) : null) },
   }));
   vi.stubGlobal("fetch", fetchMock);
   return fetchMock;

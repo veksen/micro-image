@@ -19,11 +19,11 @@ from the proxy `?meta` endpoint at runtime.
 That single rule is what lets one component serve three different acquisition paths without
 branching on which one produced its data:
 
-| Path              | Who fills `ImageMeta`                        | Cost                    |
-| ----------------- | -------------------------------------------- | ----------------------- |
-| Build-time static | `unplugin` + `?micro` loader, at build        | zero runtime            |
-| Runtime dynamic   | proxy `?meta` endpoint                        | one small JSON request  |
-| No proxy          | `sizes="auto"` + native `srcset`, at layout   | zero, but no LQIP       |
+| Path              | Who fills `ImageMeta`                       | Cost                   |
+| ----------------- | ------------------------------------------- | ---------------------- |
+| Build-time static | `unplugin` + `?micro` loader, at build      | zero runtime           |
+| Runtime dynamic   | proxy `?meta` endpoint                      | one small JSON request |
+| No proxy          | `sizes="auto"` + native `srcset`, at layout | zero, but no LQIP      |
 
 If a path starts producing a differently-shaped object, the component has to learn where its
 props came from — and at that point every future framework adapter has to learn it too. That

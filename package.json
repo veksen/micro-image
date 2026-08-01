@@ -3,9 +3,11 @@
   "scripts": {
     "build": "turbo run build",
     "dev": "dotenv -- turbo run dev --no-cache --continue",
-    "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck",
+    "lint": "oxlint",
+    "format": "oxfmt .",
+    "format:check": "oxfmt --check .",
     "clean": "turbo run clean && rm -rf node_modules",
-    "format": "prettier --write \"**/*.{ts,tsx,md}\"",
     "changeset": "changeset",
     "version-packages": "changeset version",
     "release": "turbo run build --filter=docs^... && changeset publish",
@@ -15,16 +17,20 @@
     "@changesets/cli": "^2.31.1",
     "@testing-library/dom": "^10.4.1",
     "@testing-library/react": "^16.3.2",
+    "@types/node": "^24.13.3",
     "dotenv-cli": "11.0.0",
-    "eslint": "^8.56.0",
-    "eslint-config-micro-image": "*",
     "jsdom": "^30.0.1",
-    "prettier": "^3.2.5",
-    "turbo": "latest",
-    "vite-node": "^1.6.1",
+    "oxfmt": "^0.61.0",
+    "oxlint": "^1.76.0",
+    "turbo": "^2.10.8",
+    "typescript": "^7.0.2",
+    "vite-node": "^6.0.0",
     "vitest": "^4.1.10"
   },
-  "packageManager": "npm@10.2.4",
+  "engines": {
+    "node": ">=24.18.0"
+  },
+  "packageManager": "npm@11.16.0",
   "workspaces": [
     "apps/*",
     "packages/*"
