@@ -1,10 +1,21 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { buildId, fromCache, toCache, clearCache, cacheSize } from "./cache";
+import {
+  buildId,
+  fromCache,
+  toCache,
+  clearCache,
+  cacheSize,
+  cacheBytes,
+  cacheMaxBytes,
+  setCacheMaxBytes,
+  DEFAULT_MAX_BYTES,
+} from "./cache";
 
 const URL = "https://example.com/cat.jpg";
 
 beforeEach(() => {
   clearCache();
+  setCacheMaxBytes();
 });
 
 describe("buildId", () => {
@@ -65,14 +76,76 @@ describe("in-memory store — current behaviour", () => {
     expect(fromCache("k")?.contentType).toBe("image/png");
     expect(cacheSize()).toBe(1);
   });
+});
 
-  it("grows without bound — no cap, no TTL, no eviction [BUG-16]", () => {
-    for (let i = 0; i < 5_000; i++) {
-      toCache(`id-${i}`, { contentType: "image/jpeg", buffer: Buffer.alloc(64) });
+describe("byte budget and eviction", () => {
+  const record = (bytes: number) => ({ contentType: "image/jpeg", buffer: Buffer.alloc(bytes) });
+
+  it("holds everything while under budget", () => {
+    setCacheMaxBytes(1_000);
+    toCache("a", record(300));
+    toCache("b", record(300));
+
+    expect(cacheSize()).toBe(2);
+    expect(cacheBytes()).toBe(600);
+  });
+
+  it("never exceeds the budget", () => {
+    setCacheMaxBytes(1_000);
+    for (let i = 0; i < 50; i++) {
+      toCache(`id-${i}`, record(300));
+      expect(cacheBytes()).toBeLessThanOrEqual(1_000);
+    }
+  });
+
+  it("evicts the least recently used first", () => {
+    setCacheMaxBytes(1_000);
+    toCache("a", record(400));
+    toCache("b", record(400));
+    toCache("c", record(400)); // pushes past the budget
+
+    expect(fromCache("a")).toBeUndefined();
+    expect(fromCache("b")).toBeDefined();
+    expect(fromCache("c")).toBeDefined();
+  });
+
+  it("treats a read as a use, so a hot key survives a flood of cold ones", () => {
+    setCacheMaxBytes(1_000);
+    toCache("hot", record(300));
+
+    for (let i = 0; i < 20; i++) {
+      // touch the hot key between each cold insert
+      expect(fromCache("hot")).toBeDefined();
+      toCache(`cold-${i}`, record(300));
     }
 
-    // every distinct ?width= value an attacker sends becomes a permanent entry
-    expect(cacheSize()).toBe(5_000);
+    expect(fromCache("hot")).toBeDefined();
+  });
+
+  it("does not cache a record larger than the whole budget", () => {
+    setCacheMaxBytes(1_000);
+    toCache("kept", record(500));
+    toCache("huge", record(2_000));
+
+    expect(fromCache("huge")).toBeUndefined();
+    // and it did not empty the cache trying to make room
+    expect(fromCache("kept")).toBeDefined();
+  });
+
+  it("releases the bytes of a replaced id rather than double counting", () => {
+    setCacheMaxBytes(1_000);
+    toCache("a", record(400));
+    toCache("a", record(100));
+
+    expect(cacheSize()).toBe(1);
+    expect(cacheBytes()).toBe(100);
+  });
+
+  it("defaults to a documented budget when unconfigured", () => {
+    setCacheMaxBytes();
+
+    expect(cacheMaxBytes()).toBe(DEFAULT_MAX_BYTES);
+    expect(DEFAULT_MAX_BYTES).toBe(256 * 1024 * 1024);
   });
 });
 
@@ -97,11 +170,13 @@ describe("bug ledger", () => {
     expect(a).not.toBe(b);
   });
 
-  it.fails("BUG-16: cache should evict under pressure rather than grow forever", () => {
+  it("BUG-16: cache evicts under pressure rather than growing forever", () => {
+    setCacheMaxBytes(10_000);
     for (let i = 0; i < 5_000; i++) {
       toCache(`id-${i}`, { contentType: "image/jpeg", buffer: Buffer.alloc(64) });
     }
 
     expect(cacheSize()).toBeLessThan(5_000);
+    expect(cacheBytes()).toBeLessThanOrEqual(10_000);
   });
 });

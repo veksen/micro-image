@@ -19,7 +19,7 @@ import { dirname, join } from "path";
 import { performance } from "perf_hooks";
 import type { FastifyInstance } from "fastify";
 import { buildServer } from "../src/server";
-import { clearCache, cacheBytes, cacheSize } from "../src/cache";
+import { clearCache, cacheBytes, cacheSize, cacheMaxBytes, setCacheMaxBytes } from "../src/cache";
 import { execFileSync } from "child_process";
 import os from "os";
 import { makeGif, startOrigin, type Origin } from "../src/test-helpers";
@@ -331,6 +331,58 @@ async function runHerdScenario(app: FastifyInstance, origin: Origin) {
   };
 }
 
+/**
+ * What the cache does under a flood of distinct keys.
+ *
+ * `?width=` is attacker-controlled and unbounded, so each distinct value mints
+ * an entry. This drives that directly and reports what the cache ended up
+ * holding against its budget.
+ *
+ * A smaller budget than production's default is used, so the bound is crossed
+ * without allocating a quarter of a gigabyte. Both numbers are reported, so the
+ * result cannot be read as "it fit".
+ */
+const PRESSURE_KEYS = Number(process.env.BENCH_PRESSURE_KEYS) || 200;
+const PRESSURE_BUDGET = Number(process.env.BENCH_PRESSURE_BUDGET) || 128 * 1024;
+
+async function runCachePressureScenario(app: FastifyInstance, origin: Origin) {
+  const url = `${origin.url}/q100.jpg`;
+  const configured = cacheMaxBytes();
+
+  clearCache();
+  setCacheMaxBytes(PRESSURE_BUDGET);
+
+  let requestedBytes = 0;
+  for (let i = 0; i < PRESSURE_KEYS; i++) {
+    const res = await app.inject({
+      method: "GET",
+      url: "/cache",
+      query: { image: url, width: String(100 + i) },
+    });
+    requestedBytes += res.rawPayload.byteLength;
+  }
+
+  const result = {
+    distinctKeys: PRESSURE_KEYS,
+    budgetBytes: PRESSURE_BUDGET,
+    retainedBytes: cacheBytes(),
+    entries: cacheSize(),
+    // what an unbounded cache would have been holding by now
+    unboundedBytes: requestedBytes,
+    withinBudget: cacheBytes() <= PRESSURE_BUDGET,
+    // Did the flood actually reach the budget? Without this, a workload that
+    // never approaches the bound reports "within budget" and reads as proof
+    // that eviction works, having exercised none of it. That happened once:
+    // fixing the animated-gif false positive shrank each cached variant from
+    // 1.4 MB to about 2 kB, and 60 keys stopped crossing a 32 MB budget.
+    exercisedEviction: requestedBytes > PRESSURE_BUDGET,
+  };
+
+  clearCache();
+  setCacheMaxBytes(configured);
+  return result;
+}
+
 interface Baseline {
   capturedAt?: string;
   platform: string;
@@ -360,6 +412,7 @@ function delta(current: number, previous: number, tolerance = 0): string {
 function report(
   results: ScenarioResult[],
   herd: Awaited<ReturnType<typeof runHerdScenario>>,
+  pressure: Awaited<ReturnType<typeof runCachePressureScenario>>,
   baseline?: Baseline
 ) {
   console.log(`\nproxy benchmark — ${ITERATIONS} iterations per scenario\n`);
@@ -444,6 +497,20 @@ function report(
   );
   console.log("  wall time barely moves because the work runs across cores; cpu is the cost");
 
+  console.log(
+    `\ncache under pressure: ${pressure.distinctKeys} distinct keys, ` +
+      `${(pressure.unboundedBytes / 1024).toFixed(0)} kB requested, ` +
+      `${(pressure.retainedBytes / 1024).toFixed(0)} kB retained ` +
+      `against a ${(pressure.budgetBytes / 1024).toFixed(0)} kB budget ` +
+      `(${pressure.entries} entries kept, within budget: ${pressure.withinBudget})`
+  );
+  if (!pressure.exercisedEviction) {
+    console.log(
+      "  WARNING: the flood never reached the budget, so eviction was not " +
+        "exercised. Raise BENCH_PRESSURE_KEYS or lower BENCH_PRESSURE_BUDGET."
+    );
+  }
+
   const retained = [...results].sort((a, b) => b.retainedBytesPerEntry - a.retainedBytesPerEntry);
   console.log("\nmemory retained per cached variant (nothing ever evicts it):");
   for (const r of retained.slice(0, 3)) {
@@ -468,6 +535,7 @@ function report(
 function writeSummary(
   results: ScenarioResult[],
   herd: Awaited<ReturnType<typeof runHerdScenario>>,
+  pressure: Awaited<ReturnType<typeof runCachePressureScenario>>,
   baseline?: Baseline
 ) {
   const target = process.env.GITHUB_STEP_SUMMARY;
@@ -515,6 +583,13 @@ function writeSummary(
   );
   lines.push(
     `- no Cache-Control on hit: **${results.filter((r) => !r.cacheControlOnHit).length}/${results.length}**`
+  );
+  lines.push(
+    `- cache under pressure: **${(pressure.retainedBytes / 1024 / 1024).toFixed(1)} MB** retained ` +
+      `from ${(pressure.unboundedBytes / 1024 / 1024).toFixed(1)} MB requested across ` +
+      `${pressure.distinctKeys} distinct keys, against a ` +
+      `${(pressure.budgetBytes / 1024).toFixed(0)} kB budget` +
+      (pressure.exercisedEviction ? "" : " — **budget never reached, eviction not exercised**")
   );
   lines.push(
     `- thundering herd: **${herd.upstreamFetches}** upstream fetches for ${herd.concurrency} concurrent cold requests, ` +
@@ -568,6 +643,7 @@ function gitInfo() {
 function appendHistory(
   results: ScenarioResult[],
   herd: Awaited<ReturnType<typeof runHerdScenario>>,
+  pressure: Awaited<ReturnType<typeof runCachePressureScenario>>,
   calibration: Calibration
 ) {
   const { commit, branch } = gitInfo();
@@ -596,6 +672,7 @@ function appendHistory(
     noCacheControlCount: results.filter((r) => !r.cacheControlOnHit).length,
     herdUpstreamFetches: herd.upstreamFetches,
     herd,
+    cachePressure: pressure,
     totalRetainedBytesPerRound: results.reduce((t, r) => t + r.retainedBytesPerEntry, 0),
     scenarios: results.map((r) => ({
       name: r.name,
@@ -650,6 +727,7 @@ async function main() {
     results.push(await runScenario(app, origin, scenario));
   }
   const herd = await runHerdScenario(app, origin);
+  const pressure = await runCachePressureScenario(app, origin);
 
   for (const result of results) {
     result.coldRatio = result.coldMs.p50 / calibration.sharpMs;
@@ -658,8 +736,8 @@ async function main() {
   }
 
   const baseline = SAVE_BASELINE ? undefined : loadBaseline();
-  report(results, herd, baseline);
-  writeSummary(results, herd, baseline);
+  report(results, herd, pressure, baseline);
+  writeSummary(results, herd, pressure, baseline);
 
   const payload = {
     capturedAt: new Date().toISOString(),
@@ -669,10 +747,11 @@ async function main() {
     calibration,
     results,
     herd,
+    cachePressure: pressure,
   };
 
   if (APPEND_HISTORY) {
-    appendHistory(results, herd, calibration);
+    appendHistory(results, herd, pressure, calibration);
   }
 
   if (SAVE_BASELINE) {
