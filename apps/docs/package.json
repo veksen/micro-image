@@ -27,7 +27,7 @@
     "autoprefixer": "^10.5.4",
     "eslint-config-micro-image": "*",
     "postcss": "^8.5.25",
-    "tailwindcss": "^3.4.1",
+    "tailwindcss": "^4.3.3",
     "typescript": "^7.0.2"
   }
 }
