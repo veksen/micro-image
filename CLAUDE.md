@@ -66,9 +66,25 @@ Non-negotiable, and it outranks appearing productive:
 - Asking a clarifying question beats guessing. Guessing beats nothing only when the guess is
   labeled as one.
 
+## Agent skills
+
+### Issue tracker
+
+Issues live as GitHub issues on `veksen/micro-image`, via the `gh` CLI. See
+`docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+The five canonical roles, each label string equal to its name. See
+`docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: root `CONTEXT.md` + `docs/adr/`. See `docs/agents/domain.md`.
+
 ## Reference
 
-- `CONTEXT.md` — package map, conventions, toolchain pins, known bugs
+- `CONTEXT.md` — package map, glossary, conventions, toolchain pins, known bugs
 - `VISION.md` — north star, architecture, non-goals, success criteria
 - `BUGS.md` — the bug ledger and the `it.fails` convention that tracks it
 - `docs/adr/` — architecture decisions, including seven still open
