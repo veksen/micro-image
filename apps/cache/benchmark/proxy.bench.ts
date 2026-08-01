@@ -281,28 +281,53 @@ async function runHerdScenario(app: FastifyInstance, origin: Origin) {
   clearCache();
   await fire(1);
 
-  clearCache();
-  const singleCpu = process.cpuUsage();
-  const singleStart = performance.now();
-  await fire(1);
-  const singleCpuDelta = process.cpuUsage(singleCpu);
-  const singleWallMs = performance.now() - singleStart;
+  /**
+   * Both sides are sampled repeatedly and reduced to a median.
+   *
+   * A single sample each was enough while the ratio was ~11x, because the
+   * signal swamped the noise. Once requests coalesce the two sides do nearly
+   * identical work, so one noisy sample can put the ratio below 1, which reads
+   * as "eight requests cost less CPU than one" and is nonsense.
+   */
+  const REPEATS = 5;
+  const measure = async (n: number) => {
+    clearCache();
+    const cpu = process.cpuUsage();
+    const start = performance.now();
+    await fire(n);
+    const delta = process.cpuUsage(cpu);
+    return {
+      wallMs: performance.now() - start,
+      cpuMs: (delta.user + delta.system) / 1000,
+    };
+  };
 
-  const before = origin.hits[path] || 0;
-  clearCache();
-  const cpu = process.cpuUsage();
-  const start = performance.now();
-  await fire(CONCURRENCY);
-  const cpuDelta = process.cpuUsage(cpu);
-  const elapsed = performance.now() - start;
+  const singles: Array<{ wallMs: number; cpuMs: number }> = [];
+  const herds: Array<{ wallMs: number; cpuMs: number }> = [];
+  let fetches = 0;
+
+  for (let i = 0; i < REPEATS; i++) {
+    singles.push(await measure(1));
+
+    const before = origin.hits[path] || 0;
+    herds.push(await measure(CONCURRENCY));
+    fetches = (origin.hits[path] || 0) - before;
+  }
+
+  const median = (values: number[]) => {
+    const sorted = [...values].sort((a, b) => a - b);
+    return sorted[Math.floor(sorted.length / 2)]!;
+  };
 
   return {
     concurrency: CONCURRENCY,
-    upstreamFetches: (origin.hits[path] || 0) - before,
-    wallMs: elapsed,
-    cpuMs: (cpuDelta.user + cpuDelta.system) / 1000,
-    singleWallMs,
-    singleCpuMs: (singleCpuDelta.user + singleCpuDelta.system) / 1000,
+    // from the final round; every round performs the same number
+    upstreamFetches: fetches,
+    wallMs: median(herds.map((h) => h.wallMs)),
+    cpuMs: median(herds.map((h) => h.cpuMs)),
+    singleWallMs: median(singles.map((s) => s.wallMs)),
+    singleCpuMs: median(singles.map((s) => s.cpuMs)),
+    repeats: REPEATS,
   };
 }
 
