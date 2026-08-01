@@ -23,7 +23,7 @@
     "@micro-image/tsconfig": "*",
     "@types/node": "^20.11.19",
     "@types/react": "^19.2.18",
-    "@types/react-dom": "^18.2.7",
+    "@types/react-dom": "^19.2.4",
     "autoprefixer": "^10.4.17",
     "eslint-config-micro-image": "*",
     "postcss": "^8.4.35",
