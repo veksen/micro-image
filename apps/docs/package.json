@@ -15,7 +15,7 @@
     "@micro-image/image": "*",
     "classnames": "^2.5.1",
     "next": "latest",
-    "react": "^18.2.0",
+    "react": "^19.2.8",
     "react-dom": "^18.2.0",
     "tailwindcss-radix-colors": "^1.2.0"
   },
