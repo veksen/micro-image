@@ -9,9 +9,56 @@ import { isAnimatedGif } from "./is-animated-gif";
 const httpAgent = new http.Agent({ keepAlive: true });
 const httpsAgent = new https.Agent({ keepAlive: true });
 
-export type CacheRequest = FastifyRequest<{
-  Querystring: { image: string; width?: string; blur?: "true" | "false" };
-}>;
+export interface CacheQuerystring {
+  image: string;
+  width?: string;
+  quality?: string;
+  format?: string;
+  blur?: string;
+}
+
+export type CacheRequest = FastifyRequest<{ Querystring: CacheQuerystring }>;
+
+/**
+ * The radius the proxy has always applied when a client asked for `blur=true`.
+ * The published client still sends the boolean, so the parser maps it onto the
+ * historical radius rather than inventing a new default.
+ */
+export const legacyBlurRadius = 10;
+
+/** A parsed, normalised query string. */
+export interface CacheOptions {
+  width?: number;
+  quality?: number;
+  format?: string;
+  blur?: number;
+}
+
+/** Anything unusable becomes undefined, which `buildId` omits. */
+function positiveNumber(value?: string): number | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  const parsed = Number(value);
+
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
+}
+
+/**
+ * Parses the query string once, so the cache key and the transform cannot
+ * disagree about what was asked for. That disagreement was the actual defect
+ * behind BUG-17: `buildId` includes any key handed to it, and the route only
+ * ever handed it two.
+ */
+export function parseCacheOptions(query: CacheQuerystring): CacheOptions {
+  return {
+    width: positiveNumber(query.width),
+    quality: positiveNumber(query.quality),
+    format: query.format || undefined,
+    blur: query.blur === "true" ? legacyBlurRadius : positiveNumber(query.blur),
+  };
+}
 
 export interface CompressOptions {
   contentType?: string;
@@ -98,10 +145,8 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
   });
 
   fastify.get("/cache", async (request: CacheRequest, reply) => {
-    const id = buildId(request.query.image, {
-      width: Number(request.query.width),
-      blur: request.query.blur === "true",
-    });
+    const requested = parseCacheOptions(request.query);
+    const id = buildId(request.query.image, requested);
     const cached = fromCache(id);
 
     // found in cache, use it and return
@@ -141,10 +186,15 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
       return imageBuffer;
     }
 
-    // compress image
+    // compress image.
+    //
+    // The key now carries quality, format and the blur radius, but the
+    // transform still ignores them — honouring them is the follow-up this
+    // unblocks. Until then blur stays on the historical rule, so `blur=5`
+    // remains unblurred rather than silently picking up the hardcoded radius.
     const compressedBuffer = await compress(imageBuffer, {
       contentType: upstreamContentType,
-      width: Number(request.query.width),
+      width: requested.width,
       blur: request.query.blur === "true",
     });
 

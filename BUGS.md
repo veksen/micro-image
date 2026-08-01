@@ -48,6 +48,21 @@ and will include any key it is handed — passing `quality` produces
 `...__quality-30`. The defect is the _call site_ in `server.ts`, which only ever
 passes `width` and `blur`. The ledger entry lives in `server.test.ts`.
 
+> **Fixed** — see [#8](https://github.com/veksen/micro-image/issues/8). The query
+> string is now parsed once by `parseCacheOptions`, and that one object is handed
+> to both the cache key and the transform, so the two can no longer disagree
+> about what was requested. `buildId` sorts its keys, so a caller cannot cause a
+> miss by reordering a literal, and drops `undefined`, so an unusable option and
+> an absent one share an id. `?width=`, `?width=abc`, `?width=0` and `?width=-5`
+> all normalise to "no width" instead of minting `width-0`, `width-NaN` and a
+> negative that reached sharp.
+>
+> This changes the key format, so a deployed instance sees a one-time cold cache.
+> Note the follow-up in [#9](https://github.com/veksen/micro-image/issues/9): the
+> key now carries quality, format and blur radius, but the transform still
+> ignores them, so those requests over-partition the cache without changing
+> bytes. That is wasteful and safe, which is the right way round.
+
 **BUG-13 does not produce `NaN` on a missing header.** `Headers.get` returns
 `null` when the header is absent, and `Number(null)` is `0`, not `NaN`. The real
 symptom is worse: `Compare` renders `props.contentLength ? … : "loading..."`, and
@@ -126,7 +141,7 @@ Four defects not in the original report, numbered from 28 to avoid collision.
 | 14  | `/api/meta` never responds to non-GET                               | `__tests__/api-meta.test.ts`                                | yes                                                              |
 | 15  | `Cache-Control` missing on every cache hit                          | `server.test.ts`                                            | yes                                                              |
 | 16  | unbounded in-memory cache                                           | `cache.test.ts`                                             | yes                                                              |
-| 17  | cache key omits quality / format / blur radius (see correction)     | `server.test.ts`                                            | yes                                                              |
+| 17  | cache key omits quality / format / blur radius (see correction)     | `server.test.ts`, `cache.test.ts`                           | **fixed** ([#8](https://github.com/veksen/micro-image/issues/8)) |
 | 18  | `isAnimatedGif` runs unguarded on every mime (see correction)       | `is-animated-gif.test.ts`, `server.test.ts`                 | **fixed** ([#4](https://github.com/veksen/micro-image/issues/4)) |
 | 19  | `Buffer.from(data, "binary")` double-buffers                        | `server.test.ts` (fidelity only)                            | no — cost is perf, belongs in the benchmark                      |
 | 20  | `isAnimatedGif` copies the buffer byte-by-byte in JS                | —                                                           | **fixed** incidentally with 18                                   |

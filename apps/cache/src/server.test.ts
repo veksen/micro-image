@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import type { FastifyInstance } from "fastify";
-import { buildServer } from "./server";
+import { buildServer, parseCacheOptions, legacyBlurRadius } from "./server";
 import { clearCache } from "./cache";
 import { makeGif, makeJpeg, makePng, startOrigin, type Origin } from "./test-helpers";
 
@@ -22,6 +22,51 @@ afterEach(async () => {
 function get(query: Record<string, string>) {
   return app.inject({ method: "GET", url: "/cache", query });
 }
+
+/**
+ * The query string is parsed once and handed to both the cache key and the
+ * transform. Their disagreement was the actual defect behind BUG-17, so the
+ * parser is worth testing directly rather than only through the route.
+ */
+describe("parseCacheOptions", () => {
+  const IMAGE = "https://example.com/cat.jpg";
+
+  it("returns nothing for a request that asks for nothing", () => {
+    expect(parseCacheOptions({ image: IMAGE })).toEqual({
+      width: undefined,
+      quality: undefined,
+      format: undefined,
+      blur: undefined,
+    });
+  });
+
+  it("parses the options a client actually sends", () => {
+    expect(
+      parseCacheOptions({ image: IMAGE, width: "200", quality: "30", format: "webp" })
+    ).toEqual({ width: 200, quality: 30, format: "webp", blur: undefined });
+  });
+
+  it("maps the legacy blur boolean onto the radius the proxy has always applied", () => {
+    expect(parseCacheOptions({ image: IMAGE, blur: "true" }).blur).toBe(legacyBlurRadius);
+    expect(parseCacheOptions({ image: IMAGE, blur: "false" }).blur).toBeUndefined();
+  });
+
+  it("keeps a numeric blur radius", () => {
+    expect(parseCacheOptions({ image: IMAGE, blur: "5" }).blur).toBe(5);
+  });
+
+  it("treats unusable numbers as absent so they cannot mint their own cache entry", () => {
+    // `?width=` is Number("") === 0, and `?width=abc` is NaN. Neither resizes
+    // anything, so neither may key differently from omitting width entirely.
+    for (const width of ["", "abc", "0", "-5"]) {
+      expect(parseCacheOptions({ image: IMAGE, width }).width, `width=${width}`).toBeUndefined();
+    }
+  });
+
+  it("treats an empty format as absent", () => {
+    expect(parseCacheOptions({ image: IMAGE, format: "" }).format).toBeUndefined();
+  });
+});
 
 describe("GET / — health", () => {
   it("returns the hello payload", async () => {
@@ -152,17 +197,18 @@ describe("GET /cache — unsupported mime [BUG-21]", () => {
   });
 });
 
-describe("GET /cache — dead parameters [BUG-3, BUG-4, BUG-17]", () => {
-  it("ignores ?quality= and reuses the cache entry built without it", async () => {
+describe("GET /cache — dead parameters [BUG-3, BUG-4]", () => {
+  it("keys on ?quality= but still ignores it when encoding", async () => {
     const jpeg = await makeJpeg({ width: 400, height: 300, quality: 80 });
     origin = await startOrigin({ "/cat.jpg": { body: jpeg, contentType: "image/jpeg" } });
 
     const a = await get({ image: `${origin.url}/cat.jpg`, width: "200", quality: "30" });
     const b = await get({ image: `${origin.url}/cat.jpg`, width: "200", quality: "90" });
 
-    // one upstream fetch, and the quality-30 caller's bytes are handed to the
-    // quality-90 caller — the cache key never saw either value
-    expect(origin.hits["/cat.jpg"]).toBe(1);
+    // BUG-17 is fixed, so the two qualities no longer share an entry. BUG-3 is
+    // not, so the encoder still ignores the value and both fetches produce
+    // identical bytes — wasteful, but no longer cache poisoning.
+    expect(origin.hits["/cat.jpg"]).toBe(2);
     expect(Buffer.compare(a.rawPayload, b.rawPayload)).toBe(0);
   });
 
@@ -355,7 +401,7 @@ describe("bug ledger", () => {
     expect(origin.hits["/i.svg"]).toBe(1);
   });
 
-  it.fails("BUG-17: quality should be part of the cache key", async () => {
+  it("BUG-17: quality should be part of the cache key", async () => {
     const jpeg = await makeJpeg({ width: 400, height: 300, quality: 80 });
     origin = await startOrigin({ "/cat.jpg": { body: jpeg, contentType: "image/jpeg" } });
 

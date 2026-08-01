@@ -7,45 +7,41 @@ beforeEach(() => {
   clearCache();
 });
 
-describe("buildId — current behaviour", () => {
-  it("appends width and omits blur when blur is false", () => {
-    expect(buildId(URL, { width: 100, blur: false })).toBe(`${URL}__width-100`);
+describe("buildId", () => {
+  it("appends each supplied option", () => {
+    expect(buildId(URL, { width: 100 })).toBe(`${URL}__width-100`);
   });
 
-  it("appends blur only when it is exactly true", () => {
-    expect(buildId(URL, { width: 100, blur: true })).toBe(`${URL}__width-100__blur-true`);
-  });
-
-  it("serialises a missing width as the literal string 'width-NaN'", () => {
-    // the route always passes Number(request.query.width), so an absent
-    // ?width= reaches buildId as NaN rather than undefined
-    expect(buildId(URL, { width: Number(undefined), blur: false })).toBe(`${URL}__width-NaN`);
-  });
-
-  it("treats an empty ?width= as width-0, not as absent", () => {
-    // Number("") is 0 while Number(undefined) is NaN, so `?width=` and no
-    // width at all land on two different cache keys
-    expect(buildId(URL, { width: Number(""), blur: false })).toBe(`${URL}__width-0`);
-    expect(buildId(URL, { width: Number(undefined), blur: false })).toBe(`${URL}__width-NaN`);
-  });
-
-  it("is generic over whatever keys the caller passes", () => {
-    // buildId itself iterates Object.entries, so it would happily include
-    // quality/format. The omission is at the call site in server.ts, not here.
-    expect(buildId(URL, { width: 100, blur: false, quality: 30 } as never)).toBe(
-      `${URL}__width-100__quality-30`
+  it("omits undefined options rather than serialising them", () => {
+    expect(buildId(URL, { width: 100, quality: undefined, blur: undefined })).toBe(
+      `${URL}__width-100`
     );
   });
 
-  it("distinguishes different widths", () => {
-    expect(buildId(URL, { width: 100, blur: false })).not.toBe(
-      buildId(URL, { width: 200, blur: false })
+  it("returns the bare url when no option is supplied", () => {
+    expect(buildId(URL, {})).toBe(URL);
+    expect(buildId(URL)).toBe(URL);
+  });
+
+  it("is insensitive to the order the caller builds its object in", () => {
+    // a caller must not be able to cause a miss by reordering a literal
+    expect(buildId(URL, { width: 100, quality: 30, format: "webp" })).toBe(
+      buildId(URL, { format: "webp", quality: 30, width: 100 })
     );
+  });
+
+  it("distinguishes every option that changes the output bytes", () => {
+    const base = { width: 100, quality: 75, format: "webp", blur: 5 };
+
+    expect(buildId(URL, base)).not.toBe(buildId(URL, { ...base, width: 200 }));
+    expect(buildId(URL, base)).not.toBe(buildId(URL, { ...base, quality: 30 }));
+    expect(buildId(URL, base)).not.toBe(buildId(URL, { ...base, format: "png" }));
+    expect(buildId(URL, base)).not.toBe(buildId(URL, { ...base, blur: 40 }));
   });
 
   it("distinguishes different source urls", () => {
-    expect(buildId(URL, { width: 100, blur: false })).not.toBe(
-      buildId("https://example.com/dog.jpg", { width: 100, blur: false })
+    expect(buildId(URL, { width: 100 })).not.toBe(
+      buildId("https://example.com/dog.jpg", { width: 100 })
     );
   });
 });
@@ -90,14 +86,13 @@ describe("in-memory store — current behaviour", () => {
  */
 describe("bug ledger", () => {
   // NOTE: BUG-17 as originally reported blamed cache.ts. That is not where it
-  // lives — buildId iterates Object.entries and would include any key handed to
-  // it (see the "generic over whatever keys" test above). The defect is the
-  // call site in server.ts, which only ever passes width and blur. The ledger
-  // entry for it therefore lives in server.test.ts.
+  // lived — buildId iterates Object.entries and includes any key handed to it.
+  // The defect was the call site in server.ts, which only ever passed width and
+  // blur. The end-to-end ledger entry therefore lives in server.test.ts.
 
-  it.fails("BUG-17: id should distinguish blur radius, not just on/off", () => {
-    const a = buildId(URL, { width: 100, blur: 5 } as never);
-    const b = buildId(URL, { width: 100, blur: 40 } as never);
+  it("BUG-17: id should distinguish blur radius, not just on/off", () => {
+    const a = buildId(URL, { width: 100, blur: 5 });
+    const b = buildId(URL, { width: 100, blur: 40 });
 
     expect(a).not.toBe(b);
   });
