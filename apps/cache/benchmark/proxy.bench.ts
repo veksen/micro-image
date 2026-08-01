@@ -435,23 +435,27 @@ function report(
 }
 
 /**
- * When running in GitHub Actions, append a table to the job summary so the
- * numbers are visible on the PR without downloading an artifact.
+ * Renders the results table as markdown and publishes it two ways: appended to
+ * the GitHub Actions job summary when running in CI, and written to a file that
+ * the workflow posts as a pull request comment. The file is always written, so a
+ * local run produces the same markdown a reviewer would see.
  */
-function writeJobSummary(
+function writeSummary(
   results: ScenarioResult[],
   herd: Awaited<ReturnType<typeof runHerdScenario>>,
   baseline?: Baseline
 ) {
   const target = process.env.GITHUB_STEP_SUMMARY;
-  if (!target) return;
+  const markdownOut = process.env.BENCH_MARKDOWN_OUT || join(__dirname, "summary.md");
 
   const byName = new Map((baseline?.results ?? []).map((r) => [r.name, r]));
   const lines: string[] = [];
 
+  const { commit } = gitInfo();
   lines.push("## Proxy benchmark", "");
   lines.push(
-    `${ITERATIONS} iterations per scenario on \`${process.platform}-${process.arch}\`, node ${process.version}.`,
+    `${ITERATIONS} iterations per scenario on \`${process.platform}-${process.arch}\`, ` +
+      `node ${process.version}${commit ? `, commit \`${commit.slice(0, 7)}\`` : ""}.`,
     ""
   );
 
@@ -498,11 +502,21 @@ function writeJobSummary(
       "Only byte counts and the counts above are reproducible._"
   );
 
-  appendFileSync(target, lines.join("\n") + "\n");
+  const markdown = lines.join("\n") + "\n";
+
+  // the job summary page, for whoever opens the run
+  if (target) appendFileSync(target, markdown);
+
+  // and a file, so CI can post the same table as a PR comment
+  writeFileSync(markdownOut, markdown);
 }
 
 /** Best-effort git metadata; the benchmark still runs outside a checkout. */
 function gitInfo() {
+  // On a pull_request event the workspace sits on an ephemeral merge commit, so
+  // `git rev-parse HEAD` returns a sha that appears nowhere in the branch. CI
+  // passes the real head sha through BENCH_COMMIT.
+  const override = process.env.BENCH_COMMIT;
   const run = (args: string[]) => {
     try {
       return execFileSync("git", args, {
@@ -513,7 +527,10 @@ function gitInfo() {
       return undefined;
     }
   };
-  return { commit: run(["rev-parse", "HEAD"]), branch: run(["rev-parse", "--abbrev-ref", "HEAD"]) };
+  return {
+    commit: override || run(["rev-parse", "HEAD"]),
+    branch: run(["rev-parse", "--abbrev-ref", "HEAD"]),
+  };
 }
 
 /**
@@ -617,7 +634,7 @@ async function main() {
 
   const baseline = SAVE_BASELINE ? undefined : loadBaseline();
   report(results, herd, baseline);
-  writeJobSummary(results, herd, baseline);
+  writeSummary(results, herd, baseline);
 
   const payload = {
     capturedAt: new Date().toISOString(),

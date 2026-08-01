@@ -13,6 +13,7 @@ concurrency:
 
 permissions:
   contents: write
+  pull-requests: write
 
 jobs:
   benchmark:
@@ -40,6 +41,8 @@ jobs:
         run: npm run benchmark -w apps/cache
         env:
           BENCH_ITERATIONS: 5
+          # the checkout sits on a merge commit; report the branch head instead
+          BENCH_COMMIT: ${{ github.event.pull_request.head.sha }}
 
       # On main: measure and append one point to the committed history.
       - name: Proxy benchmark and record history
@@ -47,6 +50,45 @@ jobs:
         run: npm run benchmark -w apps/cache -- --append-history
         env:
           BENCH_ITERATIONS: 15
+
+      # One comment per PR, edited in place. Creating a new one on every push
+      # buries the PR under near-identical tables.
+      #
+      # Fork PRs get a read-only token, so this is skipped rather than failed:
+      # the job summary and the artifact still carry the numbers, and
+      # pull_request_target is not worth the security exposure to avoid it.
+      - name: Comment benchmark results
+        if: >
+          github.event_name == 'pull_request' &&
+          github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          MARKER='<!-- micro-image-benchmark -->'
+          BODY_FILE=$(mktemp)
+          {
+            printf '%s\n' "$MARKER"
+            cat apps/cache/benchmark/summary.md
+            printf '\n_Posted by the Benchmark workflow. Timings are wall-clock on a shared '
+            printf 'runner and move on their own; only byte counts and the counts above reproduce._\n'
+          } > "$BODY_FILE"
+
+          # --paginate matters: the endpoint returns 30 comments per page, so on a
+          # busy PR the marker falls off page one and this would post a duplicate,
+          # which is the exact failure the marker exists to prevent.
+          EXISTING=$(gh api --paginate "repos/${GITHUB_REPOSITORY}/issues/${PR}/comments" \
+            --jq ".[] | select(.body | startswith(\"${MARKER}\")) | .id" | head -n 1)
+
+          if [ -n "$EXISTING" ]; then
+            gh api --method PATCH "repos/${GITHUB_REPOSITORY}/issues/comments/${EXISTING}" \
+              -F body=@"$BODY_FILE" --silent
+            echo "updated comment ${EXISTING}"
+          else
+            gh api --method POST "repos/${GITHUB_REPOSITORY}/issues/${PR}/comments" \
+              -F body=@"$BODY_FILE" --silent
+            echo "created a new comment"
+          fi
 
       - name: Micro-benchmarks
         run: |
