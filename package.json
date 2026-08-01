@@ -11,13 +11,15 @@
     "changeset": "changeset",
     "version-packages": "changeset version",
     "release": "turbo run build --filter=docs^... && changeset publish",
-    "test": "turbo run test"
+    "test": "turbo run test",
+    "test:coverage": "turbo run test:coverage"
   },
   "devDependencies": {
     "@changesets/cli": "^2.31.1",
     "@testing-library/dom": "^10.4.1",
     "@testing-library/react": "^16.3.2",
     "@types/node": "^24.13.3",
+    "@vitest/coverage-v8": "^4.1.10",
     "dotenv-cli": "11.0.0",
     "jsdom": "^30.0.1",
     "oxfmt": "^0.61.0",

@@ -8,7 +8,16 @@ on:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # never cancel a main run: it is the one that uploads the coverage baseline
+  # every later pull request diffs against
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+  # reading the previous main run and its artifact is an Actions-API call, and
+  # naming `permissions` at all drops every default not listed here
+  actions: read
+  pull-requests: write
 
 jobs:
   test:
@@ -16,7 +25,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repo
+        # full history: the coverage report diffs against the pull request base
+        # to list changed files, and a shallow clone has no merge-base for it
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -34,7 +47,79 @@ jobs:
         run: npm run format:check
 
       - name: Test
-        run: npm run test
+        run: npm run test:coverage
 
       - name: Build
         run: npm run build
+
+      # The baseline is whatever the last green main run uploaded. Fetched with
+      # `gh` rather than a third-party download action, matching how
+      # benchmark.yml already talks to the API. Never fails the build: with no
+      # baseline the report just renders every delta as "—".
+      - name: Download coverage baseline
+        if: github.event_name == 'pull_request'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          RUN_ID=$(gh run list --branch main --workflow "${{ github.workflow }}" \
+            --status success --limit 1 --json databaseId --jq '.[0].databaseId // empty')
+          if [ -z "$RUN_ID" ]; then
+            echo "no successful main run yet; deltas will render as em dashes"
+            exit 0
+          fi
+          gh run download "$RUN_ID" --name coverage-main --dir coverage-baseline \
+            || echo "run $RUN_ID has no coverage-main artifact (expired or predates this workflow)"
+
+      # Writes to $GITHUB_STEP_SUMMARY too, so a push to main gets a readable
+      # report even though it posts no comment.
+      - name: Render coverage report
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          node scripts/coverage-comment.mjs \
+            --baseline coverage-baseline \
+            ${BASE_REF:+--base-ref "origin/$BASE_REF"} \
+            --out coverage-comment.md
+
+      # One comment per pull request, edited in place. Creating a new one on
+      # every push buries the pull request under near-identical tables.
+      #
+      # Fork pull requests get a read-only token, so this is skipped rather than
+      # failed: the job summary still carries the numbers, and
+      # pull_request_target is not worth the security exposure to avoid it.
+      - name: Comment coverage report
+        if: >
+          github.event_name == 'pull_request' &&
+          github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          MARKER='<!-- micro-image-coverage -->'
+          EXISTING=$(gh api "repos/${GITHUB_REPOSITORY}/issues/${PR}/comments" \
+            --jq "[.[] | select(.body | startswith(\"${MARKER}\"))] | .[0].id // empty")
+
+          if [ -n "$EXISTING" ]; then
+            gh api --method PATCH "repos/${GITHUB_REPOSITORY}/issues/comments/${EXISTING}" \
+              -F body=@coverage-comment.md --silent
+            echo "updated comment ${EXISTING}"
+          else
+            gh api --method POST "repos/${GITHUB_REPOSITORY}/issues/${PR}/comments" \
+              -F body=@coverage-comment.md --silent
+            echo "created a new comment"
+          fi
+
+      # Only main publishes a baseline, and only the summaries: the report reads
+      # nothing else, and 30 days outlives any pull request that will diff
+      # against it.
+      - name: Upload coverage baseline
+        if: github.event_name == 'push'
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-main
+          path: |
+            apps/*/coverage/coverage-summary.json
+            packages/*/coverage/coverage-summary.json
+          retention-days: 30
+          if-no-files-found: error
