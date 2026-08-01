@@ -15,6 +15,8 @@
     "**/.next/**",
     "package-lock.json",
     "apps/cache/benchmark/baseline.json",
-    "apps/cache/benchmark/history.jsonl"
+    "apps/cache/benchmark/history.jsonl",
+    ".claude/skills/design/better-colors/**",
+    ".claude/skills/design/better-typography/**"
   ]
 }

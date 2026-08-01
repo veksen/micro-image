@@ -28,6 +28,34 @@
           {
             "type": "command",
             "command": ".claude/hooks/guard-bash.sh"
+          },
+          {
+            "type": "command",
+            "command": ".claude/hooks/block-direct-tools.sh"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/format-file.sh",
+            "timeout": 30000
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "npm run lint && npm run typecheck && npm run test",
+            "timeout": 180000
           }
         ]
       }
@@ -50,10 +78,12 @@
       "Bash(git commit*)",
       "Bash(git checkout -b*)",
       "Bash(git rebase origin/main*)",
+      "Bash(git worktree list*)",
       "Bash(gh *)",
       "Bash(npm ci*)",
       "Bash(npm run test*)",
       "Bash(npm run lint*)",
+      "Bash(npm run typecheck*)",
       "Bash(npm run format*)",
       "Bash(npm run build*)",
       "Bash(npm run changeset*)"

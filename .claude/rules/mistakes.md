@@ -17,6 +17,19 @@ Format:
 
 ---
 
+## 2026-08-01: Narrowed a formatter's file list without checking what it formats
+
+- **What happened:** `format-file.sh` was written to pass only `.ts/.tsx/.js/.json` to oxfmt,
+  dropping the `.md` and `.css` the source hook included. oxfmt formats Markdown, so fourteen
+  unformatted `.md` files went straight past the hook into a red `npm run format:check` in CI.
+- **Root cause:** Assumed a formatter's scope from its name instead of checking. The narrowing
+  was not even deliberate — the list was retyped rather than adapted, and the omission looked
+  like a JS-only formatter behaving normally.
+- **What to do instead:** When a hook filters by file extension, derive the list from what the
+  tool actually handles, and check it against the repo-wide command that will run in CI. If a
+  hook skips paths on purpose, the same paths must be in the tool's own ignore config —
+  otherwise the repo-wide check fails on exactly the files the hook was told to leave alone.
+
 ## 2026-08-01: Ported a harness pattern its own author had already deleted
 
 - **What happened:** While porting the agent harness from `monorepo-boilerplate`, proposed
