@@ -38,3 +38,24 @@ Multi-source `<picture>` output stays a future addition, not a launch requiremen
   is a latency optimization, not an independence one.
 - Format must be in the cache key. It currently isn't — the proxy's key includes only width
   and blur, which is a live bug (see `BUGS.md`) and a correctness prerequisite for this ADR.
+
+## Progress
+
+Still proposed. Two steps have landed, and they are the half of this ADR that does not
+depend on ratifying it.
+
+The cache-key prerequisite above is met (#8). The key now carries format, so a WebP and a
+JPEG of the same source no longer collide.
+
+The proxy encodes to an explicitly requested format (#9), via `?format=`. That is the
+mechanism this ADR assumes, but not the policy: selection is still the caller's, not the
+proxy's.
+
+What ratification would still require:
+
+- Negotiation keyed on `Accept`, which is the actual decision here.
+- The cache key must then include the **resolved** format rather than the requested one, and
+  responses need `Vary: Accept`. Keying on the request alone would let a WebP answer a client
+  that did not accept it.
+- `?format=auto` is deliberately unimplemented and reserved for exactly that meaning. It is
+  not a synonym for the source format — `?format=original` is.

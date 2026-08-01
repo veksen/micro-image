@@ -3,8 +3,8 @@ import useImage from "./use-image.hook";
 import { useImageCacheConfig } from "./image-cache-provider";
 import { IProviderOptions } from "./providers/base";
 
-// TODO: remove hardcode
-const quality = 75;
+/** Used when the caller does not ask for a quality of its own. */
+const defaultQuality = 75;
 
 interface GenerateSrcSetOptions {
   baseSrc: string;
@@ -25,11 +25,11 @@ const generateSrcSet = ({
     .map((index) => {
       const width = index * 100;
       const url = generator({
+        quality: defaultQuality,
         ...defaultGeneratorOptions,
         url: cacheProxyUrl,
         src: baseSrc,
         width: width,
-        quality: quality,
       });
       return `${url} ${width}w`;
     })
@@ -53,12 +53,14 @@ function Image<GeneratorOptions extends IProviderOptions = IProviderOptions>(
   const imageRef = useRef<HTMLImageElement | null>(null);
   const observerRef = useRef<ResizeObserver | null>(null);
 
+  // `quality` leads the spread so a caller's own value wins. It used to trail
+  // it, which meant generatorOptions.quality was accepted and then overwritten.
   const imageSrc = config.generateUrl({
+    quality: defaultQuality,
     ...config.defaultGeneratorOptions,
     ...props.generatorOptions,
     url: config.cacheProxyUrl,
     src: props.src,
-    quality: quality,
   });
 
   const blurredImageSrc = config.generateUrl({

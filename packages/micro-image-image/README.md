@@ -34,6 +34,24 @@ Note: The image will always take 100% of the width of the parent, that's intende
 
 `alt`: optional, defaults to empty string if not provided.
 
+`generatorOptions`: optional, passed through to the provider when it builds each URL.
+
+- `quality`: encoder quality, 1 to 100. Defaults to 75. Values outside the range are clamped.
+  Applies to JPEG and WebP output; PNG and GIF stay lossless.
+- `format`: the format to encode to — `jpg`, `jpeg`, `png`, `webp` or `gif`. Omit it to keep
+  the source format, or pass `original` to ask for that explicitly. Any other value is
+  rejected with a 400.
+- `blur`: blur radius. Omit it for no blur.
+
+```js
+<Image
+  src="https://picsum.photos/800/500"
+  width={800}
+  height={500}
+  generatorOptions={{ format: "webp", quality: 60 }}
+/>
+```
+
 ## Provider
 
 A provider component is available. Must be used to set your provider (micro-image or ipx), and the URL to your image proxy.
