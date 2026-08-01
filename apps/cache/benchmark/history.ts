@@ -20,6 +20,15 @@ interface ScenarioEntry {
   name: string;
   originBytes: number;
   servedBytes: number;
+  retainedBytesPerEntry?: number;
+  coldCpuMs?: number;
+  coldCpuRatio?: number;
+  samples?: {
+    coldMs: number[];
+    warmMs: number[];
+    coldCpuMs: number[];
+    warmCpuMs: number[];
+  };
   savedPercent: number;
   passedThroughUnprocessed: boolean;
   originFetchesPerRequest: number;
@@ -31,7 +40,11 @@ interface ScenarioEntry {
 }
 
 interface Entry {
+  /** 1 kept only the p50. 2 keeps raw samples, CPU and retained bytes. */
+  schemaVersion?: number;
   capturedAt: string;
+  machine?: { cpuModel?: string; cores?: number; ci?: boolean };
+  herd?: { concurrency: number; cpuMs: number; singleCpuMs: number };
   commit?: string;
   branch?: string;
   platform: string;
@@ -49,6 +62,10 @@ const COUNTS: Array<[string, (e: Entry) => number]> = [
   ["returned unprocessed", (e) => e.unprocessedCount],
   ["no Cache-Control on hit", (e) => e.noCacheControlCount],
   ["herd upstream fetches", (e) => e.herdUpstreamFetches],
+  [
+    "herd cpu multiple",
+    (e) => (e.herd ? Math.round((e.herd.cpuMs / e.herd.singleCpuMs) * 10) / 10 : 0),
+  ],
 ];
 
 const COUNT_LABELS = COUNTS.map(([label]) => label);
@@ -152,6 +169,54 @@ function renderTerminal(entries: Entry[]) {
     }
   }
 
+  // cpu time: less sensitive to scheduling noise than wall clock, and the
+  // metric that exposes work done in parallel across cores
+  const hasCpu = entries.some((e) => e.scenarios.some((s) => s.coldCpuRatio !== undefined));
+  if (hasCpu) {
+    console.log("\ncold cpu time, calibrated");
+    console.log(
+      `${"scenario".padEnd(width)}  ${"trend".padEnd(entries.length)}  ${"now".padStart(10)}  ${"vs first".padStart(9)}`
+    );
+    console.log("-".repeat(width + entries.length + 25));
+
+    for (const name of names) {
+      const series = entries
+        .map((e) => e.scenarios.find((s) => s.name === name)?.coldCpuRatio)
+        .filter((v): v is number => v !== undefined);
+      if (series.length === 0) continue;
+
+      console.log(
+        `${name.padEnd(width)}  ${sparkline(series).padEnd(entries.length)}  ` +
+          `${series[series.length - 1]!.toFixed(2).padStart(10)}  ${pct(series[series.length - 1]!, series[0]!).padStart(9)}`
+      );
+    }
+  }
+
+  // retained memory: exact, and the only metric that describes the unbounded
+  // cache. Process RSS and heap deltas are swamped by GC timing.
+  const hasRetained = entries.some((e) =>
+    e.scenarios.some((s) => s.retainedBytesPerEntry !== undefined)
+  );
+  if (hasRetained) {
+    console.log("\nmemory retained per cached variant");
+    console.log(
+      `${"scenario".padEnd(width)}  ${"trend".padEnd(entries.length)}  ${"now".padStart(10)}  ${"vs first".padStart(9)}`
+    );
+    console.log("-".repeat(width + entries.length + 25));
+
+    for (const name of names) {
+      const series = entries
+        .map((e) => e.scenarios.find((s) => s.name === name)?.retainedBytesPerEntry)
+        .filter((v): v is number => v !== undefined);
+      if (series.length === 0) continue;
+
+      console.log(
+        `${name.padEnd(width)}  ${sparkline(series).padEnd(entries.length)}  ` +
+          `${kb(series[series.length - 1]!).padStart(10)}  ${pct(series[series.length - 1]!, series[0]!).padStart(9)}`
+      );
+    }
+  }
+
   // behavioural counts: exact, and each one is a bug still open
   console.log("\nbehavioural counts");
   console.log(
@@ -167,6 +232,14 @@ function renderTerminal(entries: Entry[]) {
     console.log(
       `${label.padEnd(width)}  ${sparkline(series).padEnd(entries.length)}  ` +
         `${String(now).padStart(10)}  ${change.padStart(9)}`
+    );
+  }
+
+  const legacy = entries.filter((e) => (e.schemaVersion ?? 1) < 2).length;
+  if (legacy > 0) {
+    console.log(
+      `\n${legacy} of ${entries.length} points predate schema 2 and kept only the p50. ` +
+        `They cannot be re-summarised by a different method; re-run those commits to backfill.`
     );
   }
 

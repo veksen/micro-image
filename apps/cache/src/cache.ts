@@ -48,3 +48,14 @@ export function clearCache(): void {
 export function cacheSize(): number {
   return Object.keys(cache).length;
 }
+
+/**
+ * Test/benchmark affordance: total bytes retained by the cache.
+ *
+ * This is the honest measure of what an unbounded cache costs. Process RSS and
+ * heap deltas are swamped by GC timing and allocator behaviour; the sum of the
+ * buffers actually held is exact and reproduces run to run.
+ */
+export function cacheBytes(): number {
+  return Object.values(cache).reduce((total, record) => total + record.buffer.byteLength, 0);
+}

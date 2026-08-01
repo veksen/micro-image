@@ -119,16 +119,91 @@ The trend report prints the calibration spread across the window it is showing,
 so a run on unusually slow hardware is visible rather than mistaken for a
 regression.
 
+## Memory and CPU
+
+Four of the open issues are resource bugs, so bytes and wall-clock alone cannot
+describe them.
+
+**CPU time** is recorded per scenario with `process.cpuUsage()`, user plus
+system. It is the metric that exposes work spread across cores, which wall-clock
+hides. Sharp threads internally, so cold CPU regularly exceeds cold wall time on
+the same request.
+
+The clearest case is #18, no request coalescing:
+
+|      | 1 request | 8 concurrent | multiple       |
+| ---- | --------- | ------------ | -------------- |
+| cpu  | 15 ms     | 148-182 ms   | **10.0-11.8x** |
+| wall | 5.5 ms    | 15-19 ms     | 2.7-3.5x       |
+
+Eight concurrent cold requests cost more than eight times the CPU of one,
+measured across three runs. The excess is sharp's thread pool oversubscribing
+the cores. Wall time rises only about 3x, so a dashboard watching latency would
+show a mild blip while the box saturates.
+
+**Retained memory** is recorded as the exact sum of the buffers the cache holds,
+not as a process metric. That choice was made after measuring: heap and external
+deltas around a cache fill came back negative, because GC timing dominated the
+signal, and `arrayBuffers` did not move at all. RSS moved but carries allocator
+fragmentation with it. The sum of `buffer.byteLength` across entries is exact,
+reproduces run to run, and is the number #6 is actually about.
+
+It also connects two issues that looked unrelated:
+
+| scenario                                | retained per cached variant |
+| --------------------------------------- | --------------------------- |
+| jpeg q80 -> 400w (compressed correctly) | 8.0 kB                      |
+| jpeg q100 -> 400w (#4 passthrough)      | **1416.0 kB**               |
+
+A variant that trips #4 costs 177x the memory of one that does not. #4 does not
+just waste bandwidth, it makes the unbounded cache in #6 fill 177x faster. Fifty
+cached variants of one quality-100 image retain 69 MB.
+
+Process RSS and heap deltas are deliberately not recorded. They were measured,
+found to be noise, and left out rather than charted as if they meant something.
+
+## Re-analysing old points
+
+History entries carry a `schemaVersion`. Version 2 stores **every raw sample**,
+not just the p50: 15 wall-clock and 15 CPU samples per scenario per point, plus
+the calibration's own samples, plus the CPU model and core count of the machine
+that produced them. A point costs about 7 kB.
+
+This exists so a better methodology can be applied to data already collected. A
+summary cannot be re-summarised: trimmed means, outlier rejection, MAD and
+bootstrapped intervals all need the distribution. Keeping only the median would
+have made every past point permanently unanalysable by any method other than the
+one that recorded it.
+
+So there are two ways to apply a new method retroactively:
+
+1. **To points already recorded.** Read `history.jsonl`, take
+   `scenarios[].samples`, and summarise them however the new method says. Works
+   for every schema 2 point without re-running anything.
+2. **To commits recorded before schema 2, or to commits never benchmarked.**
+   Check the commit out and re-run. Fixtures are generated rather than
+   committed, so they cannot have drifted, and byte counts are reproducible
+   across platforms. This is also the path for backfilling history from before
+   the benchmark existed.
+
+`benchmark:history` prints a warning naming how many points in the window predate
+schema 2, so unanalysable points are visible rather than silently averaged in.
+
+One thing a new method will want to know: the first CPU sample of each scenario
+runs about twice the rest, from JIT warmup that two discarded priming requests do
+not fully absorb. The p50 already ignores it. A trimmed mean should drop it
+explicitly.
+
 ## Where results are held
 
-|                 | What                                 | Lifetime                     |
-| --------------- | ------------------------------------ | ---------------------------- |
-| `history.jsonl` | one point per main commit, committed | permanent, append-only       |
-| `baseline.json` | pre-fix reference, committed         | until deliberately refreshed |
-| `history.html`  | generated report, gitignored         | regenerated on demand        |
-| `results.json`  | last local run, gitignored           | overwritten every run        |
-| job summary     | markdown table on the PR             | with the workflow run        |
-| artifact        | results and history from CI          | GitHub's artifact retention  |
+|                 | What                                                   | Lifetime                     |
+| --------------- | ------------------------------------------------------ | ---------------------------- |
+| `history.jsonl` | one point per main commit, committed, with raw samples | permanent, append-only       |
+| `baseline.json` | pre-fix reference, committed                           | until deliberately refreshed |
+| `history.html`  | generated report, gitignored                           | regenerated on demand        |
+| `results.json`  | last local run, gitignored                             | overwritten every run        |
+| job summary     | markdown table on the PR                               | with the workflow run        |
+| artifact        | results and history from CI                            | GitHub's artifact retention  |
 
 `baseline.json` answers "what did this specific change do". `history.jsonl`
 answers "how has this moved over time". The baseline is a fixed pre-fix

@@ -19,8 +19,9 @@ import { dirname, join } from "path";
 import { performance } from "perf_hooks";
 import type { FastifyInstance } from "fastify";
 import { buildServer } from "../src/server";
-import { clearCache } from "../src/cache";
+import { clearCache, cacheBytes, cacheSize } from "../src/cache";
 import { execFileSync } from "child_process";
+import os from "os";
 import { makeGif, startOrigin, type Origin } from "../src/test-helpers";
 import { photoJpeg, photoPng, photoWebp } from "./fixtures";
 import { calibrate, type Calibration } from "./calibration";
@@ -64,9 +65,15 @@ interface ScenarioResult {
   passedThroughUnprocessed: boolean;
   coldMs: Stats;
   warmMs: Stats;
+  /** CPU time consumed, user plus system. Exceeds wall time when sharp threads. */
+  coldCpuMs: Stats;
+  warmCpuMs: Stats;
   /** coldMs.p50 divided by the calibration run, comparable across machines. */
   coldRatio?: number;
   warmRatio?: number;
+  coldCpuRatio?: number;
+  /** Bytes this scenario's response occupies in the unbounded cache. */
+  retainedBytesPerEntry: number;
   originFetchesPerRequest: number;
   cacheControlOnHit: boolean;
   note?: string;
@@ -78,6 +85,15 @@ interface Stats {
   p95: number;
   min: number;
   max: number;
+  /**
+   * Every sample, not just the summary.
+   *
+   * Summaries cannot be re-analysed. Trimmed means, outlier rejection, MAD and
+   * bootstrapped intervals all need the distribution, so a better methodology
+   * arriving later can only be applied to points that kept their raw numbers.
+   * Keeping them costs a few kB per point.
+   */
+  samples: number[];
 }
 
 function stats(samples: number[]): Stats {
@@ -89,6 +105,7 @@ function stats(samples: number[]): Stats {
     p95: at(0.95),
     min: sorted[0]!,
     max: sorted[sorted.length - 1]!,
+    samples: samples.map((v) => Number(v.toFixed(4))),
   };
 }
 
@@ -182,24 +199,42 @@ async function runScenario(
 
   const coldSamples: number[] = [];
   const warmSamples: number[] = [];
+  const coldCpuSamples: number[] = [];
+  const warmCpuSamples: number[] = [];
   let servedBytes = 0;
   let cacheControlOnHit = false;
+  let retainedBytesPerEntry = 0;
 
+  // one discarded pass: the first request through a route pays JIT warmup,
+  // which showed up as ~2x the CPU of every subsequent request
+  clearCache();
+  await get();
+  await get();
+
+  // counted after the warmup, or its fetches inflate the per-request ratio
   const fetchesBefore = origin.hits[scenario.path] || 0;
 
   for (let i = 0; i < ITERATIONS; i++) {
     clearCache();
 
+    const coldCpu = process.cpuUsage();
     const coldStart = performance.now();
     const cold = await get();
     coldSamples.push(performance.now() - coldStart);
+    const coldCpuDelta = process.cpuUsage(coldCpu);
+    coldCpuSamples.push((coldCpuDelta.user + coldCpuDelta.system) / 1000);
 
+    const warmCpu = process.cpuUsage();
     const warmStart = performance.now();
     const warm = await get();
     warmSamples.push(performance.now() - warmStart);
+    const warmCpuDelta = process.cpuUsage(warmCpu);
+    warmCpuSamples.push((warmCpuDelta.user + warmCpuDelta.system) / 1000);
 
     servedBytes = cold.rawPayload.byteLength;
     cacheControlOnHit = warm.headers["cache-control"] !== undefined;
+    // what one cached variant of this scenario costs in retained memory
+    retainedBytesPerEntry = cacheSize() > 0 ? cacheBytes() / cacheSize() : 0;
   }
 
   const fetches = (origin.hits[scenario.path] || 0) - fetchesBefore;
@@ -215,30 +250,59 @@ async function runScenario(
     passedThroughUnprocessed: servedBytes === scenario.body.byteLength,
     coldMs: stats(coldSamples),
     warmMs: stats(warmSamples),
+    coldCpuMs: stats(coldCpuSamples),
+    warmCpuMs: stats(warmCpuSamples),
+    retainedBytesPerEntry,
+    // the two discarded warmup requests are not counted against the total
     originFetchesPerRequest: fetches / (ITERATIONS * 2),
     cacheControlOnHit,
     note: scenario.note,
   };
 }
 
+/**
+ * The cost of no request coalescing.
+ *
+ * Wall time barely moves when N cold requests arrive at once, because the work
+ * runs in parallel across cores. CPU time is what actually multiplies, so it is
+ * the number that describes the bug.
+ */
 async function runHerdScenario(app: FastifyInstance, origin: Origin) {
   const path = "/herd.jpg";
   const url = `${origin.url}${path}`;
-  const before = origin.hits[path] || 0;
+  const fire = (n: number) =>
+    Promise.all(
+      Array.from({ length: n }, () =>
+        app.inject({ method: "GET", url: "/cache", query: { image: url, width: "400" } })
+      )
+    );
+
+  // warm the JIT so the comparison is not measuring first-call compilation
+  clearCache();
+  await fire(1);
 
   clearCache();
+  const singleCpu = process.cpuUsage();
+  const singleStart = performance.now();
+  await fire(1);
+  const singleCpuDelta = process.cpuUsage(singleCpu);
+  const singleWallMs = performance.now() - singleStart;
+
+  const before = origin.hits[path] || 0;
+  clearCache();
+  const cpu = process.cpuUsage();
   const start = performance.now();
-  await Promise.all(
-    Array.from({ length: CONCURRENCY }, () =>
-      app.inject({ method: "GET", url: "/cache", query: { image: url, width: "400" } })
-    )
-  );
+  await fire(CONCURRENCY);
+  const cpuDelta = process.cpuUsage(cpu);
   const elapsed = performance.now() - start;
 
   return {
     concurrency: CONCURRENCY,
     upstreamFetches: (origin.hits[path] || 0) - before,
     wallMs: elapsed,
+    cpuMs: (cpuDelta.user + cpuDelta.system) / 1000,
+    singleWallMs,
+    singleCpuMs: (singleCpuDelta.user + singleCpuDelta.system) / 1000,
   };
 }
 
@@ -286,7 +350,7 @@ function report(
 
   const columns = ["scenario".padEnd(22), "origin kB", "served kB", "saved %".padStart(8)];
   if (baseline) columns.push("Δ served");
-  columns.push("cold ms", "warm ms");
+  columns.push("cold ms", "cold cpu", "warm ms");
   if (baseline) columns.push("Δ cold");
 
   const header = columns.join("  ");
@@ -304,7 +368,7 @@ function report(
     if (baseline) {
       row.push(before ? delta(r.servedBytes, before.servedBytes, BYTE_TOLERANCE) : "     new");
     }
-    row.push(ms(r.coldMs.p50), ms(r.warmMs.p50));
+    row.push(ms(r.coldMs.p50), ms(r.coldCpuMs.p50), ms(r.warmMs.p50));
     if (baseline) {
       row.push(before ? delta(r.coldMs.p50, before.coldMs.p50) : "     new");
     }
@@ -347,6 +411,27 @@ function report(
     `\nthundering herd: ${herd.concurrency} concurrent cold requests caused ` +
       `${herd.upstreamFetches} upstream fetches in ${herd.wallMs.toFixed(0)}ms`
   );
+  console.log(
+    `  cpu ${herd.singleCpuMs.toFixed(0)}ms for 1 request, ` +
+      `${herd.cpuMs.toFixed(0)}ms for ${herd.concurrency} ` +
+      `(${(herd.cpuMs / herd.singleCpuMs).toFixed(1)}x cpu, ` +
+      `${(herd.wallMs / herd.singleWallMs).toFixed(1)}x wall)`
+  );
+  console.log("  wall time barely moves because the work runs across cores; cpu is the cost");
+
+  const retained = [...results].sort((a, b) => b.retainedBytesPerEntry - a.retainedBytesPerEntry);
+  console.log("\nmemory retained per cached variant (nothing ever evicts it):");
+  for (const r of retained.slice(0, 3)) {
+    console.log(`  ${r.name.padEnd(22)} ${kb(r.retainedBytesPerEntry)} kB per entry`);
+  }
+  const worst = retained[0]!;
+  const best = retained[retained.length - 1]!;
+  if (best.retainedBytesPerEntry > 0) {
+    console.log(
+      `  worst is ${(worst.retainedBytesPerEntry / best.retainedBytesPerEntry).toFixed(0)}x the smallest, ` +
+        `so an unprocessed passthrough poisons the cache budget too`
+    );
+  }
 }
 
 /**
@@ -372,7 +457,7 @@ function writeJobSummary(
 
   const head = ["scenario", "origin kB", "served kB", "saved %"];
   if (baseline) head.push("Δ served");
-  head.push("cold ms", "warm ms");
+  head.push("cold ms", "cold cpu", "warm ms", "retained kB");
   lines.push(`| ${head.join(" | ")} |`);
   lines.push(`| ${head.map(() => "---").join(" | ")} |`);
 
@@ -387,7 +472,8 @@ function writeJobSummary(
     if (baseline) {
       row.push(before ? delta(r.servedBytes, before.servedBytes, BYTE_TOLERANCE).trim() : "new");
     }
-    row.push(r.coldMs.p50.toFixed(2), r.warmMs.p50.toFixed(2));
+    row.push(r.coldMs.p50.toFixed(2), r.coldCpuMs.p50.toFixed(2), r.warmMs.p50.toFixed(2));
+    row.push((r.retainedBytesPerEntry / 1024).toFixed(1));
     lines.push(`| ${row.join(" | ")} |`);
   }
 
@@ -402,7 +488,9 @@ function writeJobSummary(
     `- no Cache-Control on hit: **${results.filter((r) => !r.cacheControlOnHit).length}/${results.length}**`
   );
   lines.push(
-    `- thundering herd: **${herd.upstreamFetches}** upstream fetches for ${herd.concurrency} concurrent cold requests`
+    `- thundering herd: **${herd.upstreamFetches}** upstream fetches for ${herd.concurrency} concurrent cold requests, ` +
+      `costing **${(herd.cpuMs / herd.singleCpuMs).toFixed(1)}x** the CPU of one but only ` +
+      `${(herd.wallMs / herd.singleWallMs).toFixed(1)}x the wall time`
   );
   lines.push("");
   lines.push(
@@ -441,12 +529,23 @@ function appendHistory(
   calibration: Calibration
 ) {
   const { commit, branch } = gitInfo();
+  const cpus = os.cpus();
   const entry = {
+    // 1: p50 only. 2: raw samples, CPU time, retained bytes, machine details.
+    // Points at schema 1 cannot be re-analysed with a different summary method.
+    schemaVersion: 2,
     capturedAt: new Date().toISOString(),
     commit,
     branch,
     platform: `${process.platform}-${process.arch}`,
     node: process.version,
+    // recorded so a later noise model can account for the machine
+    machine: {
+      cpuModel: cpus[0]?.model,
+      cores: cpus.length,
+      totalMemMb: Math.round(os.totalmem() / 1024 / 1024),
+      ci: Boolean(process.env.CI),
+    },
     iterations: ITERATIONS,
     calibration,
     unprocessedCount: results.filter(
@@ -454,6 +553,8 @@ function appendHistory(
     ).length,
     noCacheControlCount: results.filter((r) => !r.cacheControlOnHit).length,
     herdUpstreamFetches: herd.upstreamFetches,
+    herd,
+    totalRetainedBytesPerRound: results.reduce((t, r) => t + r.retainedBytesPerEntry, 0),
     scenarios: results.map((r) => ({
       name: r.name,
       originBytes: r.originBytes,
@@ -462,10 +563,21 @@ function appendHistory(
       passedThroughUnprocessed: r.passedThroughUnprocessed,
       originFetchesPerRequest: Number(r.originFetchesPerRequest.toFixed(3)),
       cacheControlOnHit: r.cacheControlOnHit,
+      retainedBytesPerEntry: r.retainedBytesPerEntry,
       coldMs: Number(r.coldMs.p50.toFixed(3)),
       warmMs: Number(r.warmMs.p50.toFixed(3)),
+      coldCpuMs: Number(r.coldCpuMs.p50.toFixed(3)),
+      warmCpuMs: Number(r.warmCpuMs.p50.toFixed(3)),
       coldRatio: r.coldRatio !== undefined ? Number(r.coldRatio.toFixed(4)) : undefined,
       warmRatio: r.warmRatio !== undefined ? Number(r.warmRatio.toFixed(4)) : undefined,
+      coldCpuRatio: r.coldCpuRatio !== undefined ? Number(r.coldCpuRatio.toFixed(4)) : undefined,
+      // full distributions, so a later methodology can re-summarise this point
+      samples: {
+        coldMs: r.coldMs.samples,
+        warmMs: r.warmMs.samples,
+        coldCpuMs: r.coldCpuMs.samples,
+        warmCpuMs: r.warmCpuMs.samples,
+      },
     })),
   };
 
@@ -500,6 +612,7 @@ async function main() {
   for (const result of results) {
     result.coldRatio = result.coldMs.p50 / calibration.sharpMs;
     result.warmRatio = result.warmMs.p50 / calibration.sharpMs;
+    result.coldCpuRatio = result.coldCpuMs.p50 / calibration.sharpMs;
   }
 
   const baseline = SAVE_BASELINE ? undefined : loadBaseline();

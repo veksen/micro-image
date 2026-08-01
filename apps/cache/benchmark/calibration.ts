@@ -51,6 +51,9 @@ export interface Calibration {
   sharpMs: number;
   /** Median ms for a fixed pure-JS byte loop. */
   jsMs: number;
+  /** Raw samples, so a later methodology can re-derive its own summary. */
+  sharpSamples: number[];
+  jsSamples: number[];
 }
 
 export async function calibrate(): Promise<Calibration> {
@@ -87,5 +90,7 @@ export async function calibrate(): Promise<Calibration> {
     version: CALIBRATION_VERSION,
     sharpMs: median(sharpSamples),
     jsMs: median(jsSamples),
+    sharpSamples: sharpSamples.map((v) => Number(v.toFixed(4))),
+    jsSamples: jsSamples.map((v) => Number(v.toFixed(4))),
   };
 }
