@@ -14,14 +14,14 @@ selection is the selling point and must stay.**
 
 Existing responsive image solutions each miss at least one axis:
 
-| Solution           | Container-width driven | No hardcoded dimensions | No runtime round trip | Framework-agnostic | Self-hosted proxy |
-| ------------------ | ---------------------- | ----------------------- | --------------------- | ------------------ | ----------------- |
-| `next/image`       | no (viewport)          | yes (static import)     | for statics           | no (Next only)     | no                |
-| `@unpic`           | no (viewport)          | partial                 | yes                   | yes                | pluggable         |
-| `astro:assets`     | no (viewport)          | yes                     | yes                   | no (Astro)         | no                |
-| `vite-imagetools`  | no                     | manual                  | yes                   | Vite only          | no                |
-| `<img srcset>`     | no                     | yes                     | yes                   | yes                | no                |
-| **micro-image**    | **yes**                | **yes**                 | **yes**               | **yes**            | **yes**           |
+| Solution          | Container-width driven | No hardcoded dimensions | No runtime round trip | Framework-agnostic | Self-hosted proxy |
+| ----------------- | ---------------------- | ----------------------- | --------------------- | ------------------ | ----------------- |
+| `next/image`      | no (viewport)          | yes (static import)     | for statics           | no (Next only)     | no                |
+| `@unpic`          | no (viewport)          | partial                 | yes                   | yes                | pluggable         |
+| `astro:assets`    | no (viewport)          | yes                     | yes                   | no (Astro)         | no                |
+| `vite-imagetools` | no                     | manual                  | yes                   | Vite only          | no                |
+| `<img srcset>`    | no                     | yes                     | yes                   | yes                | no                |
+| **micro-image**   | **yes**                | **yes**                 | **yes**               | **yes**            | **yes**           |
 
 The differentiator is **container-width selection + self-hosted proxy + framework-agnostic**.
 All three, or it is just another image library.

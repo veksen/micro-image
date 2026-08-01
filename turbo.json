@@ -1,22 +1,24 @@
 {
-  "$schema": "https://turbo.build/schema.json",
-  "globalDotEnv": [".env"],
+  "$schema": "https://turborepo.com/schema.json",
+  "globalDependencies": [".env"],
   "globalEnv": [
     "PORT",
     "NEXT_PUBLIC_DOCS_URL",
     "NEXT_PUBLIC_IMAGE_PROXY_URL",
     "NEXT_PUBLIC_IMGPROXY_URL"
   ],
-  "pipeline": {
+  "tasks": {
     "build": {
       "outputs": ["dist/**", ".next/**", "!.next/cache/**"],
+      "dependsOn": ["^build"]
+    },
+    "typecheck": {
       "dependsOn": ["^build"]
     },
     "test": {
       "outputs": ["coverage/**"],
       "dependsOn": []
     },
-    "lint": {},
     "dev": {
       "cache": false,
       "persistent": true

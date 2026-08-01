@@ -18,7 +18,7 @@ metadata arrives is a public-surface decision:
   and no collision surface.
 
 The contract already says the component accepts each field as an optional prop, because the
-runtime `?meta` path fills them in. So this is really a question about the *build-time* path's
+runtime `?meta` path fills them in. So this is really a question about the _build-time_ path's
 injection, not about the component's public API.
 
 ## Decision (proposed)

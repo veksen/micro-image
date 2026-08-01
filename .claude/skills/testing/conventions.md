@@ -5,11 +5,11 @@ package.
 
 ## Layout
 
-| Package                      | Config                | Tests                                          |
-| ---------------------------- | --------------------- | ---------------------------------------------- |
-| `apps/cache`                 | `vitest.config.ts`    | `src/*.test.ts` — proxy, cache keys, GIF guard  |
-| `packages/micro-image-image` | `vitest.config.ts`    | `src/**/*.test.{ts,tsx}` — providers, component, hook |
-| `apps/docs`                  | `vitest.config.ts`    | `src/**/*.test.{ts,tsx}` + `src/__tests__/`     |
+| Package                      | Config             | Tests                                                 |
+| ---------------------------- | ------------------ | ----------------------------------------------------- |
+| `apps/cache`                 | `vitest.config.ts` | `src/*.test.ts` — proxy, cache keys, GIF guard        |
+| `packages/micro-image-image` | `vitest.config.ts` | `src/**/*.test.{ts,tsx}` — providers, component, hook |
+| `apps/docs`                  | `vitest.config.ts` | `src/**/*.test.{ts,tsx}` + `src/__tests__/`           |
 
 Tests are **colocated** with their source (`imgproxy.ts` → `imgproxy.test.ts`). The one
 `__tests__/` directory in the docs app holds tests with no single source file to sit beside
@@ -60,6 +60,6 @@ fixtures at several quality settings and assert across all of them.
 ## Naming
 
 - Characterization tests carry the bug tag at the end: `"… [BUG-5]"`.
-- Ledger tests lead with it: `"BUG-5: blur should be absent …"`, and state the *wanted*
+- Ledger tests lead with it: `"BUG-5: blur should be absent …"`, and state the _wanted_
   behavior, not the current one.
 - Ordinary tests need no tag.

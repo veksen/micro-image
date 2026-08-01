@@ -6,15 +6,15 @@ Operational detail for working in this repo. `CLAUDE.md` is the charter; this fi
 
 npm workspaces (`apps/*`, `packages/*`) orchestrated by turbo.
 
-| Path                             | Name                       | What it is                                              | Published |
-| -------------------------------- | -------------------------- | ------------------------------------------------------- | --------- |
-| `apps/cache`                     | `micro-image-cache`        | Fastify + sharp image proxy. Downloads, resizes, caches. | no        |
-| `apps/docs`                      | `@micro-image/docs`        | Next.js docs site (pages router, Tailwind).              | no        |
-| `apps/imgproxy`                  | `imgproxy`                 | Dockerfile only — imgproxy deployed as a render service. | no        |
-| `packages/micro-image-image`     | `@micro-image/image`       | The React `<Image>` + `ImageCacheProvider`.              | **yes**   |
-| `packages/micro-image-utils`     | `@micro-image/utils`       | Shared React utilities.                                  | **yes**   |
-| `packages/micro-image-tsconfig`  | `@micro-image/tsconfig`    | Shared tsconfigs.                                        | no        |
-| `packages/eslint-config-micro-image` | `eslint-config-micro-image` | Shared ESLint preset.                                | no        |
+| Path                                 | Name                        | What it is                                               | Published |
+| ------------------------------------ | --------------------------- | -------------------------------------------------------- | --------- |
+| `apps/cache`                         | `micro-image-cache`         | Fastify + sharp image proxy. Downloads, resizes, caches. | no        |
+| `apps/docs`                          | `@micro-image/docs`         | Next.js docs site (pages router, Tailwind).              | no        |
+| `apps/imgproxy`                      | `imgproxy`                  | Dockerfile only — imgproxy deployed as a render service. | no        |
+| `packages/micro-image-image`         | `@micro-image/image`        | The React `<Image>` + `ImageCacheProvider`.              | **yes**   |
+| `packages/micro-image-utils`         | `@micro-image/utils`        | Shared React utilities.                                  | **yes**   |
+| `packages/micro-image-tsconfig`      | `@micro-image/tsconfig`     | Shared tsconfigs.                                        | no        |
+| `packages/eslint-config-micro-image` | `eslint-config-micro-image` | Shared ESLint preset.                                    | no        |
 
 `.changeset/config.json` ignores the unpublished ones. Any change to a published package
 needs a changeset; `CHANGELOG.md` files are generated, never hand-edited.
@@ -36,7 +36,7 @@ test name, a proposal — use the term, not a synonym.
   Not "image data" or "image info".
 - **Provider** — a URL builder for one image proxy, under
   `packages/micro-image-image/src/providers/`. Each exports `generateUrl`. `ipx`, `imgproxy`,
-  and `micro-image` are providers; the proxy in `apps/cache` is a *proxy*, not a provider.
+  and `micro-image` are providers; the proxy in `apps/cache` is a _proxy_, not a provider.
 - **Proxy** — the server that resizes, compresses, and caches. Self-hosted. `apps/cache` is a
   reference implementation of one.
 - **Core** — the framework-agnostic half of the planned build-time plugin: the `?micro`
@@ -47,22 +47,22 @@ test name, a proposal — use the term, not a synonym.
   is undecided (ADR-0002).
 - **srcset ladder** — the set of widths emitted in `srcset`, clamped to intrinsic width
   (ADR-0003). Not "breakpoints", which are a CSS concept.
-- **Characterization test** — asserts what the code does *today*, tagged `[BUG-n]`. Keeps CI
+- **Characterization test** — asserts what the code does _today_, tagged `[BUG-n]`. Keeps CI
   green and catches regressions.
-- **Ledger test** — an `it.fails` test asserting what the code *should* do. Passes while the
+- **Ledger test** — an `it.fails` test asserting what the code _should_ do. Passes while the
   bug exists, fails when it is fixed. See `BUGS.md`.
 
 ## Commands
 
-| Command             | Effect                                                       |
-| ------------------- | ------------------------------------------------------------ |
-| `npm ci`            | Install. **Never `npm install`** — see Toolchain below.       |
-| `npm run test`      | `turbo run test` → vitest in cache, docs, and image.          |
-| `npm run lint`      | `turbo run lint`. Note: `apps/cache` has no lint script.      |
-| `npm run format`    | Prettier over `**/*.{ts,tsx,md}`.                             |
-| `npm run build`     | `turbo run build`.                                            |
-| `npm run changeset` | Author a changeset.                                           |
-| `npm run dev`       | **Do not run.** Persistent watchers that never exit.          |
+| Command             | Effect                                                   |
+| ------------------- | -------------------------------------------------------- |
+| `npm ci`            | Install. **Never `npm install`** — see Toolchain below.  |
+| `npm run test`      | `turbo run test` → vitest in cache, docs, and image.     |
+| `npm run lint`      | `turbo run lint`. Note: `apps/cache` has no lint script. |
+| `npm run format`    | Prettier over `**/*.{ts,tsx,md}`.                        |
+| `npm run build`     | `turbo run build`.                                       |
+| `npm run changeset` | Author a changeset.                                      |
+| `npm run dev`       | **Do not run.** Persistent watchers that never exit.     |
 
 ## Toolchain
 

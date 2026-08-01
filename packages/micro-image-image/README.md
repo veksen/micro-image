@@ -11,19 +11,14 @@ npm install @micro-image/image
 ## Usage
 
 ```js
-import Image from "@micro-image/react"
+import Image from "@micro-image/react";
 
 function YourComponent() {
   return (
     <div>
-      <Image
-        src="https://picsum.photos/800/500"
-        width={800}
-        height={500}
-        objectFit="cover"
-      />
+      <Image src="https://picsum.photos/800/500" width={800} height={500} objectFit="cover" />
     </div>
-  )
+  );
 }
 ```
 
@@ -44,30 +39,22 @@ Note: The image will always take 100% of the width of the parent, that's intende
 A provider component is available. Must be used to set your provider (micro-image or ipx), and the URL to your image proxy.
 
 ```js
-import Image, { ImageCacheProvider } from "@micro-image/react"
+import Image, { ImageCacheProvider } from "@micro-image/react";
 
 function YourComponent() {
   return (
     <div>
-      <Image
-        src="https://picsum.photos/800/500"
-        width={800}
-        height={500}
-        objectFit="cover"
-      />
+      <Image src="https://picsum.photos/800/500" width={800} height={500} objectFit="cover" />
     </div>
-  )
+  );
 }
 
 function App() {
   return (
-    <ImageCacheProvider
-      provider="micro-image"
-      cacheProxyUrl="http://localhost:4000/cache"
-    >
+    <ImageCacheProvider provider="micro-image" cacheProxyUrl="http://localhost:4000/cache">
       <YourComponent />
     </ImageCacheProvider>
-  )
+  );
 }
 ```
 

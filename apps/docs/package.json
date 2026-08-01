@@ -4,9 +4,9 @@
   "private": true,
   "scripts": {
     "build": "next build",
-    "start": "next start ",
+    "start": "next start",
     "dev": "next dev -p 3002",
-    "lint": "next lint",
+    "typecheck": "tsc --noEmit",
     "clean": "rm -rf .turbo && rm -rf node_modules && rm -rf .next",
     "test": "vitest run",
     "test:watch": "vitest"
@@ -14,18 +14,17 @@
   "dependencies": {
     "@micro-image/image": "*",
     "classnames": "^2.5.1",
-    "next": "latest",
+    "next": "^16.2.12",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "tailwindcss-radix-colors": "^2.1.0"
   },
   "devDependencies": {
     "@micro-image/tsconfig": "*",
-    "@types/node": "^20.11.19",
+    "@tailwindcss/postcss": "^4.3.3",
+    "@types/node": "^24.13.3",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.4",
-    "autoprefixer": "^10.5.4",
-    "eslint-config-micro-image": "*",
     "postcss": "^8.5.25",
     "tailwindcss": "^4.3.3",
     "typescript": "^7.0.2"

@@ -20,21 +20,21 @@ to `@micro-image/image`, and rewrite them to hoist a `?micro` import and spread 
 
 ```jsx
 // authored
-<Image src="./hero.jpg" alt="…" />
+<Image src="./hero.jpg" alt="…" />;
 
 // after transform (conceptual)
 import _micro0 from "./hero.jpg?micro";
 <Image {..._micro0} alt="…" />;
 ```
 
-| Package                       | Transforms                   | Parser               |
-| ----------------------------- | ---------------------------- | -------------------- |
-| `@micro-image/plugin-react`   | JSX in `.jsx`/`.tsx`         | babel or oxc         |
-| `@micro-image/plugin-solid`   | JSX (same shape as React)    | babel                |
-| `@micro-image/plugin-preact`  | JSX (same shape as React)    | babel                |
-| `@micro-image/plugin-vue`     | `<Image>` in SFC `<template>` | `@vue/compiler-sfc`  |
-| `@micro-image/plugin-svelte`  | `<Image>` in `.svelte`       | `svelte/compiler`    |
-| `@micro-image/plugin-astro`   | `<Image>` in `.astro`        | `@astrojs/compiler`  |
+| Package                      | Transforms                    | Parser              |
+| ---------------------------- | ----------------------------- | ------------------- |
+| `@micro-image/plugin-react`  | JSX in `.jsx`/`.tsx`          | babel or oxc        |
+| `@micro-image/plugin-solid`  | JSX (same shape as React)     | babel               |
+| `@micro-image/plugin-preact` | JSX (same shape as React)     | babel               |
+| `@micro-image/plugin-vue`    | `<Image>` in SFC `<template>` | `@vue/compiler-sfc` |
+| `@micro-image/plugin-svelte` | `<Image>` in `.svelte`        | `svelte/compiler`   |
+| `@micro-image/plugin-astro`  | `<Image>` in `.astro`         | `@astrojs/compiler` |
 
 **An adapter that grows a second job is a bug.** The moment file reading or resizing leaks
 into one, the next framework costs thousands of lines instead of hundreds — and the success
