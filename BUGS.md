@@ -123,39 +123,39 @@ Four defects not in the original report, numbered from 28 to avoid collision.
 
 ## Coverage
 
-| #   | Bug                                                                 | Test file                                                   | Ledger                                                           |
-| --- | ------------------------------------------------------------------- | ----------------------------------------------------------- | ---------------------------------------------------------------- |
-| 1   | `useImage` downloads a full-size variant and discards the bytes     | `image.component.test.tsx`                                  | yes                                                              |
-| 2   | blur radius flattened to a boolean end-to-end                       | `providers/micro-image.test.ts`, `image.component.test.tsx` | yes                                                              |
-| 3   | `quality` accepted by the client, ignored by the proxy              | `server.test.ts`                                            | yes                                                              |
-| 4   | `format` accepted by the client, ignored by the proxy               | `server.test.ts`                                            | yes                                                              |
-| 5   | `generateUrl` always emits `blur=false`                             | `providers/micro-image.test.ts`                             | yes                                                              |
-| 6   | imgproxy single-element option arrays are correct by accident       | `providers/imgproxy.test.ts`                                | yes                                                              |
-| 7   | duplicate `if (!imageRef.current) return;`                          | —                                                           | no (see below)                                                   |
-| 8   | `useImage` cleanup calls `removeEventListener` on property handlers | `use-image.hook.test.tsx`                                   | yes                                                              |
-| 9   | `loaded` / `fetching` returned but never gate rendering             | `image.component.test.tsx`                                  | yes                                                              |
-| 10  | first paint ships no `srcset` / `sizes` for the preload scanner     | `image.component.test.tsx`                                  | yes                                                              |
-| 11  | `getImageProportions` downloads the full original for two integers  | `image-utils.test.ts`                                       | yes                                                              |
-| 12  | `Compare` clobbers `onload` and never cleans up                     | `compare.component.test.tsx`                                | yes                                                              |
-| 13  | `/api/meta` mishandles a missing `content-length` (see correction)  | `__tests__/api-meta.test.ts`                                | yes                                                              |
-| 14  | `/api/meta` never responds to non-GET                               | `__tests__/api-meta.test.ts`                                | yes                                                              |
-| 15  | `Cache-Control` missing on every cache hit                          | `server.test.ts`                                            | yes                                                              |
-| 16  | unbounded in-memory cache                                           | `cache.test.ts`                                             | yes                                                              |
-| 17  | cache key omits quality / format / blur radius (see correction)     | `server.test.ts`, `cache.test.ts`                           | **fixed** ([#8](https://github.com/veksen/micro-image/issues/8)) |
-| 18  | `isAnimatedGif` runs unguarded on every mime (see correction)       | `is-animated-gif.test.ts`, `server.test.ts`                 | **fixed** ([#4](https://github.com/veksen/micro-image/issues/4)) |
-| 19  | `Buffer.from(data, "binary")` double-buffers                        | `server.test.ts` (fidelity only)                            | no — cost is perf, belongs in the benchmark                      |
-| 20  | `isAnimatedGif` copies the buffer byte-by-byte in JS                | —                                                           | **fixed** incidentally with 18                                   |
-| 21  | unsupported content types are never cached                          | `server.test.ts`                                            | yes                                                              |
-| 22  | upstream `content-type` echoed with no validation                   | `server.test.ts`                                            | yes                                                              |
-| 23  | no thundering-herd protection                                       | `server.test.ts`                                            | yes                                                              |
-| 24  | no `timeout` / `maxContentLength` / `maxBodyLength` on axios        | `server.test.ts`                                            | yes                                                              |
-| 25  | SSRF — `?image=` accepts any URL                                    | `server.test.ts`                                            | yes                                                              |
-| 26  | sharp errors bubble up as unhandled 500s                            | `server.test.ts`                                            | yes                                                              |
-| 27  | quality / format / blur advertised but silently dropped             | covered by 2, 3, 4                                          | yes                                                              |
-| 28  | ipx bogus `image_` modifier                                         | `providers/ipx.test.ts`                                     | yes                                                              |
-| 29  | ipx unencoded source URL                                            | `providers/ipx.test.ts`                                     | yes                                                              |
-| 30  | imgproxy standard base64 instead of base64url                       | `providers/imgproxy.test.ts`                                | yes                                                              |
-| 31  | imgproxy missing signature / `insecure` segment                     | `providers/imgproxy.test.ts`                                | yes                                                              |
+| #   | Bug                                                                 | Test file                                                   | Ledger                                                             |
+| --- | ------------------------------------------------------------------- | ----------------------------------------------------------- | ------------------------------------------------------------------ |
+| 1   | `useImage` downloads a full-size variant and discards the bytes     | `image.component.test.tsx`                                  | yes                                                                |
+| 2   | blur radius flattened to a boolean end-to-end                       | `providers/micro-image.test.ts`, `image.component.test.tsx` | yes                                                                |
+| 3   | `quality` accepted by the client, ignored by the proxy              | `server.test.ts`                                            | yes                                                                |
+| 4   | `format` accepted by the client, ignored by the proxy               | `server.test.ts`                                            | yes                                                                |
+| 5   | `generateUrl` always emits `blur=false`                             | `providers/micro-image.test.ts`                             | yes                                                                |
+| 6   | imgproxy single-element option arrays are correct by accident       | `providers/imgproxy.test.ts`                                | yes                                                                |
+| 7   | duplicate `if (!imageRef.current) return;`                          | —                                                           | no (see below)                                                     |
+| 8   | `useImage` cleanup calls `removeEventListener` on property handlers | `use-image.hook.test.tsx`                                   | yes                                                                |
+| 9   | `loaded` / `fetching` returned but never gate rendering             | `image.component.test.tsx`                                  | yes                                                                |
+| 10  | first paint ships no `srcset` / `sizes` for the preload scanner     | `image.component.test.tsx`                                  | yes                                                                |
+| 11  | `getImageProportions` downloads the full original for two integers  | `image-utils.test.ts`                                       | yes                                                                |
+| 12  | `Compare` clobbers `onload` and never cleans up                     | `compare.component.test.tsx`                                | yes                                                                |
+| 13  | `/api/meta` mishandles a missing `content-length` (see correction)  | `__tests__/api-meta.test.ts`                                | yes                                                                |
+| 14  | `/api/meta` never responds to non-GET                               | `__tests__/api-meta.test.ts`                                | yes                                                                |
+| 15  | `Cache-Control` missing on every cache hit                          | `server.test.ts`                                            | yes                                                                |
+| 16  | unbounded in-memory cache                                           | `cache.test.ts`                                             | yes                                                                |
+| 17  | cache key omits quality / format / blur radius (see correction)     | `server.test.ts`, `cache.test.ts`                           | **fixed** ([#8](https://github.com/veksen/micro-image/issues/8))   |
+| 18  | `isAnimatedGif` runs unguarded on every mime (see correction)       | `is-animated-gif.test.ts`, `server.test.ts`                 | **fixed** ([#4](https://github.com/veksen/micro-image/issues/4))   |
+| 19  | `Buffer.from(data, "binary")` double-buffers                        | `server.test.ts` (fidelity only)                            | no — cost is perf, belongs in the benchmark                        |
+| 20  | `isAnimatedGif` copies the buffer byte-by-byte in JS                | —                                                           | **fixed** incidentally with 18                                     |
+| 21  | unsupported content types are never cached                          | `server.test.ts`                                            | yes                                                                |
+| 22  | upstream `content-type` echoed with no validation                   | `server.test.ts`                                            | yes                                                                |
+| 23  | no thundering-herd protection                                       | `server.test.ts`                                            | **fixed** ([#18](https://github.com/veksen/micro-image/issues/18)) |
+| 24  | no `timeout` / `maxContentLength` / `maxBodyLength` on axios        | `server.test.ts`                                            | yes                                                                |
+| 25  | SSRF — `?image=` accepts any URL                                    | `server.test.ts`                                            | yes                                                                |
+| 26  | sharp errors bubble up as unhandled 500s                            | `server.test.ts`                                            | yes                                                                |
+| 27  | quality / format / blur advertised but silently dropped             | covered by 2, 3, 4                                          | yes                                                                |
+| 28  | ipx bogus `image_` modifier                                         | `providers/ipx.test.ts`                                     | yes                                                                |
+| 29  | ipx unencoded source URL                                            | `providers/ipx.test.ts`                                     | yes                                                                |
+| 30  | imgproxy standard base64 instead of base64url                       | `providers/imgproxy.test.ts`                                | yes                                                                |
+| 31  | imgproxy missing signature / `insecure` segment                     | `providers/imgproxy.test.ts`                                | yes                                                                |
 
 ### Deliberately untested
 

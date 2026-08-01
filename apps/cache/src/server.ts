@@ -5,6 +5,7 @@ import axios from "axios";
 import sharp from "sharp";
 import { buildId, fromCache, toCache } from "./cache";
 import { isAnimatedGif } from "./is-animated-gif";
+import { coalesce } from "./coalesce";
 
 const httpAgent = new http.Agent({ keepAlive: true });
 const httpsAgent = new https.Agent({ keepAlive: true });
@@ -155,60 +156,66 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
       return cached.buffer;
     }
 
-    const image = await downloadImage(request.query.image);
+    // Concurrent requests that reach here for the same id share one download
+    // and one transform. Everything inside runs once; every caller gets its
+    // result and sets its own headers from it.
+    const result = await coalesce(id, async () => {
+      const image = await downloadImage(request.query.image);
 
-    // axios types response header values as `AxiosHeaderValue | undefined`; older
-    // typings resolved this to `string`. Cast rather than coerce so the runtime
-    // path is byte-for-byte what it was — including BUG-22, where an upstream
-    // content-type is relayed with no validation.
-    const upstreamContentType = image.headers["content-type"] as string;
+      // axios types response header values as `AxiosHeaderValue | undefined`; older
+      // typings resolved this to `string`. Cast rather than coerce so the runtime
+      // path is byte-for-byte what it was — including BUG-22, where an upstream
+      // content-type is relayed with no validation.
+      const upstreamContentType = image.headers["content-type"] as string;
 
-    // not supported, return as is
-    if (!isSupported(upstreamContentType)) {
-      reply.type(upstreamContentType).code(200);
-      reply.header("Cache-Control", cacheControl);
-      return image.data;
-    }
+      // not supported, return as is.
+      // Deliberately still not written to the cache: that is BUG-21, tracked by
+      // its own ledger test and issue, and fixing it here would flip a test that
+      // belongs to another change.
+      if (!isSupported(upstreamContentType)) {
+        return { contentType: upstreamContentType, body: image.data as Buffer };
+      }
 
-    const imageBuffer = Buffer.from(image.data, "binary");
+      const imageBuffer = Buffer.from(image.data, "binary");
 
-    // animated gif, return as is. The mime guard matters: the animation probe
-    // reads fixed offsets that carry unrelated data in other formats, so
-    // running it on a non-gif is asking for a false positive.
-    if (image.headers["content-type"] === gifMime && isAnimatedGif(imageBuffer)) {
-      toCache(id, {
+      // animated gif, return as is. The mime guard matters: the animation probe
+      // reads fixed offsets that carry unrelated data in other formats, so
+      // running it on a non-gif is asking for a false positive.
+      if (upstreamContentType === gifMime && isAnimatedGif(imageBuffer)) {
+        toCache(id, {
+          contentType: upstreamContentType,
+          buffer: imageBuffer,
+        });
+
+        return { contentType: upstreamContentType, body: imageBuffer };
+      }
+
+      // compress image.
+      //
+      // The key now carries quality, format and the blur radius, but the
+      // transform still ignores them — honouring them is the follow-up this
+      // unblocks. Until then blur stays on the historical rule, so `blur=5`
+      // remains unblurred rather than silently picking up the hardcoded radius.
+      const compressedBuffer = await compress(imageBuffer, {
         contentType: upstreamContentType,
-        buffer: imageBuffer,
+        width: requested.width,
+        blur: request.query.blur === "true",
       });
 
-      reply.type(upstreamContentType).code(200);
-      reply.header("Cache-Control", cacheControl);
-      return imageBuffer;
-    }
+      // use the smallest between original and compressed
+      const imageBufferToUse = getSmallestImage(compressedBuffer, imageBuffer);
 
-    // compress image.
-    //
-    // The key now carries quality, format and the blur radius, but the
-    // transform still ignores them — honouring them is the follow-up this
-    // unblocks. Until then blur stays on the historical rule, so `blur=5`
-    // remains unblurred rather than silently picking up the hardcoded radius.
-    const compressedBuffer = await compress(imageBuffer, {
-      contentType: upstreamContentType,
-      width: requested.width,
-      blur: request.query.blur === "true",
+      toCache(id, {
+        contentType: upstreamContentType,
+        buffer: imageBufferToUse,
+      });
+
+      return { contentType: upstreamContentType, body: imageBufferToUse };
     });
 
-    // use the smallest between original and compressed
-    const imageBufferToUse = getSmallestImage(compressedBuffer, imageBuffer);
-
-    toCache(id, {
-      contentType: upstreamContentType,
-      buffer: imageBufferToUse,
-    });
-
-    reply.type(upstreamContentType).code(200);
+    reply.type(result.contentType).code(200);
     reply.header("Cache-Control", cacheControl);
-    return imageBufferToUse;
+    return result.body;
   });
 
   return fastify;

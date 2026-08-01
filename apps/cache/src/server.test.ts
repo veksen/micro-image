@@ -346,22 +346,6 @@ describe("GET /cache — no upstream limits [BUG-24]", () => {
   });
 });
 
-describe("GET /cache — concurrency [BUG-23]", () => {
-  it("runs a separate upstream fetch per concurrent cold request", async () => {
-    const jpeg = await makeJpeg({ width: 400, height: 300, quality: 80 });
-    origin = await startOrigin({
-      "/cat.jpg": { body: jpeg, contentType: "image/jpeg", delayMs: 50 },
-    });
-
-    await Promise.all(
-      Array.from({ length: 8 }, () => get({ image: `${origin!.url}/cat.jpg`, width: "200" }))
-    );
-
-    // nothing coalesces in-flight work for the same key
-    expect(origin.hits["/cat.jpg"]).toBe(8);
-  });
-});
-
 describe("GET /cache — byte fidelity [BUG-19]", () => {
   it("does not corrupt bytes despite the 'binary' encoding argument", async () => {
     // Buffer.from(buffer, "binary") ignores the encoding when the input is
@@ -481,7 +465,7 @@ describe("bug ledger", () => {
     expect(res.statusCode).toBeGreaterThanOrEqual(500);
   });
 
-  it.fails("BUG-23: concurrent cold requests should coalesce to one fetch", async () => {
+  it("BUG-23: concurrent cold requests coalesce to one fetch", async () => {
     const jpeg = await makeJpeg({ width: 400, height: 300, quality: 80 });
     origin = await startOrigin({
       "/cat.jpg": { body: jpeg, contentType: "image/jpeg", delayMs: 50 },
