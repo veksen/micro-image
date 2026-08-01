@@ -23,7 +23,7 @@
   },
   "devDependencies": {
     "@types/node": "20.11.19",
-    "@types/sharp": "^0.31.1",
+    "@types/sharp": "^0.32.0",
     "@typescript-eslint/eslint-plugin": "^7.0.2",
     "@typescript-eslint/parser": "^7.0.2",
     "dotenv": "^17.4.2",
