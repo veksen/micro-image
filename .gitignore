@@ -18,3 +18,4 @@ public/dist
 # benchmark output
 apps/cache/benchmark/results.json
 apps/cache/benchmark/history.html
+apps/cache/benchmark/summary.md
