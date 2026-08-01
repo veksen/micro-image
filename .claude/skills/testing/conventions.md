@@ -5,18 +5,25 @@ package.
 
 ## Layout
 
-| Package                      | Config             | Tests                                                 |
-| ---------------------------- | ------------------ | ----------------------------------------------------- |
-| `apps/cache`                 | `vitest.config.ts` | `src/*.test.ts` — proxy, cache keys, GIF guard        |
-| `packages/micro-image-image` | `vitest.config.ts` | `src/**/*.test.{ts,tsx}` — providers, component, hook |
-| `apps/docs`                  | `vitest.config.ts` | `src/**/*.test.{ts,tsx}` + `src/__tests__/`           |
+| Package                      | Config              | Tests                                                 |
+| ---------------------------- | ------------------- | ----------------------------------------------------- |
+| `apps/cache`                 | `vitest.config.mts` | `src/*.test.ts` — proxy, cache keys, GIF guard        |
+| `packages/micro-image-image` | `vitest.config.ts`  | `src/**/*.test.{ts,tsx}` — providers, component, hook |
+| `apps/docs`                  | `vitest.config.mts` | `src/**/*.test.{ts,tsx}` + `src/__tests__/`           |
+
+The `.mts` extension is load-bearing. `apps/cache` and `apps/docs` are not
+`"type": "module"`, so Vite would try to load a `.ts` config as CommonJS and fail on its
+`import`. `packages/micro-image-image` is `"type": "module"` and keeps the plain `.ts`.
+
+`apps/docs` additionally sets `oxc.jsx` in its config. Next.js requires `jsx: "preserve"` in
+tsconfig, Vite honours that, and un-transformed JSX then fails import analysis.
 
 Tests are **colocated** with their source (`imgproxy.ts` → `imgproxy.test.ts`). The one
 `__tests__/` directory in the docs app holds tests with no single source file to sit beside
 (`api-meta.test.ts`).
 
-CI runs `.github/workflows/test.yml` on push to `main` and on every PR: `npm ci` → test →
-build.
+CI runs `.github/workflows/test.yml` on push to `main` and on every PR: `npm ci` → lint →
+format check → test → build.
 
 ## Environment
 

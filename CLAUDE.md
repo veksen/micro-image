@@ -10,9 +10,12 @@ criteria.
 
 ## Stack
 
-> **Pending.** The toolchain is mid-upgrade in a parallel branch. This section is filled in
-> once the library bump lands; until then read `CONTEXT.md` § Toolchain, which records the
-> current pinned versions and flags which of them are expected to change.
+Node 24, npm workspaces, turbo 2. TypeScript 7 everywhere. tsdown builds the two published
+packages; oxlint and oxfmt cover the whole repo as single binaries, not per-package tasks.
+`apps/cache` is Fastify + sharp, `apps/docs` is Next.js 16 (pages router) on Tailwind 4, and
+the React component targets React 19. Tests are vitest 4.
+
+`CONTEXT.md` § Toolchain carries the exact pins and the breaking changes behind them.
 
 ## Workflow
 
@@ -34,9 +37,9 @@ Follow these in order. Do not skip steps and do not claim a step passed without 
 ## Constraints
 
 - **Do not run `npm run dev`.** It starts persistent watchers that never exit.
-- **Use `npm ci`, not `npm install`.** Root `package.json` declares `"turbo": "latest"` while
-  the lockfile pins `1.12.4`, and turbo 2+ renamed `turbo.json`'s `pipeline` key to `tasks`.
-  A stray `npm install` can silently upgrade turbo and break every task in the repo.
+- **Default to `npm ci`.** It installs exactly what the lockfile records and never rewrites
+  it. `npm install` is the deliberate tool for changing a dependency — run it on purpose,
+  then commit the lockfile it produces. Never hand-edit the lockfile.
 - **Never commit on `main`.** Branch first (`.claude/rules/git-workflow.md`). A PreToolUse
   hook enforces this.
 - **Never revert without asking.** Prefer a forward fix. If a revert genuinely looks right,
