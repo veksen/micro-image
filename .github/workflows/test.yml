@@ -97,8 +97,13 @@ jobs:
           PR: ${{ github.event.pull_request.number }}
         run: |
           MARKER='<!-- micro-image-coverage -->'
-          EXISTING=$(gh api "repos/${GITHUB_REPOSITORY}/issues/${PR}/comments" \
-            --jq "[.[] | select(.body | startswith(\"${MARKER}\"))] | .[0].id // empty")
+          # --paginate matters: the endpoint returns 30 comments per page, so on a
+          # busy pull request the marker falls off page one and this would post a
+          # duplicate, which is the exact failure the marker exists to prevent.
+          # jq runs once per page under --paginate, so pick the first match with
+          # head rather than indexing, the same way benchmark.yml does.
+          EXISTING=$(gh api --paginate "repos/${GITHUB_REPOSITORY}/issues/${PR}/comments" \
+            --jq ".[] | select(.body | startswith(\"${MARKER}\")) | .id" | head -n 1)
 
           if [ -n "$EXISTING" ]; then
             gh api --method PATCH "repos/${GITHUB_REPOSITORY}/issues/comments/${EXISTING}" \
