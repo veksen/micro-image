@@ -8,5 +8,17 @@ export default defineConfig({
     include: ["src/**/*.test.{ts,tsx}"],
     benchmark: { include: ["src/**/*.bench.ts"] },
     globals: false,
+    coverage: {
+      provider: "v8",
+      // see apps/cache/vitest.config.mts for why include/exclude are spelled out
+      include: ["src/**/*.{ts,tsx}"],
+      exclude: [
+        "src/**/*.test.{ts,tsx}",
+        "src/**/*.bench.ts",
+        "src/**/*.d.ts",
+        "src/**/test-helpers.tsx",
+      ],
+      reporter: ["text", "json-summary"],
+    },
   },
 });

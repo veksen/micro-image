@@ -20,3 +20,8 @@ public/dist
 apps/cache/benchmark/results.json
 apps/cache/benchmark/history.html
 apps/cache/benchmark/summary.md
+
+# coverage output
+coverage
+coverage-baseline
+coverage-comment.md

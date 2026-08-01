@@ -12,6 +12,7 @@
     "dev": "tsx watch src/index.ts",
     "clean": "rm -rf .turbo && rm -rf node_modules && rm -rf dist",
     "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
     "test:watch": "vitest",
     "bench": "vitest bench --run",
     "benchmark": "vite-node benchmark/proxy.bench.ts",
