@@ -4,7 +4,7 @@ services:
     runtime: node
     repo: https://github.com/veksen/micro-image.git
     plan: standard
-    buildCommand: npm install; npm run build
+    buildCommand: npm ci; npm run build
     startCommand: npm --workspace=micro-image-cache start
     envVars:
       - key: PORT
@@ -15,7 +15,7 @@ services:
     name: docs
     runtime: node
     plan: free
-    buildCommand: npm install; npm run build
+    buildCommand: npm ci; npm run build
     startCommand: npm run --workspace=@micro-image/docs start
     envVars:
       - key: PORT

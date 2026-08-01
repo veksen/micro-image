@@ -6,15 +6,14 @@ Operational detail for working in this repo. `CLAUDE.md` is the charter; this fi
 
 npm workspaces (`apps/*`, `packages/*`) orchestrated by turbo.
 
-| Path                                 | Name                        | What it is                                               | Published |
-| ------------------------------------ | --------------------------- | -------------------------------------------------------- | --------- |
-| `apps/cache`                         | `micro-image-cache`         | Fastify + sharp image proxy. Downloads, resizes, caches. | no        |
-| `apps/docs`                          | `@micro-image/docs`         | Next.js docs site (pages router, Tailwind).              | no        |
-| `apps/imgproxy`                      | `imgproxy`                  | Dockerfile only — imgproxy deployed as a render service. | no        |
-| `packages/micro-image-image`         | `@micro-image/image`        | The React `<Image>` + `ImageCacheProvider`.              | **yes**   |
-| `packages/micro-image-utils`         | `@micro-image/utils`        | Shared React utilities.                                  | **yes**   |
-| `packages/micro-image-tsconfig`      | `@micro-image/tsconfig`     | Shared tsconfigs.                                        | no        |
-| `packages/eslint-config-micro-image` | `eslint-config-micro-image` | Shared ESLint preset.                                    | no        |
+| Path                            | Name                    | What it is                                               | Published |
+| ------------------------------- | ----------------------- | -------------------------------------------------------- | --------- |
+| `apps/cache`                    | `micro-image-cache`     | Fastify + sharp image proxy. Downloads, resizes, caches. | no        |
+| `apps/docs`                     | `@micro-image/docs`     | Next.js docs site (pages router, Tailwind).              | no        |
+| `apps/imgproxy`                 | `imgproxy`              | Dockerfile only — imgproxy deployed as a render service. | no        |
+| `packages/micro-image-image`    | `@micro-image/image`    | The React `<Image>` + `ImageCacheProvider`.              | **yes**   |
+| `packages/micro-image-utils`    | `@micro-image/utils`    | Shared React utilities.                                  | **yes**   |
+| `packages/micro-image-tsconfig` | `@micro-image/tsconfig` | Shared tsconfigs.                                        | no        |
 
 `.changeset/config.json` ignores the unpublished ones. Any change to a published package
 needs a changeset; `CHANGELOG.md` files are generated, never hand-edited.
@@ -54,33 +53,47 @@ test name, a proposal — use the term, not a synonym.
 
 ## Commands
 
-| Command             | Effect                                                   |
-| ------------------- | -------------------------------------------------------- |
-| `npm ci`            | Install. **Never `npm install`** — see Toolchain below.  |
-| `npm run test`      | `turbo run test` → vitest in cache, docs, and image.     |
-| `npm run lint`      | `turbo run lint`. Note: `apps/cache` has no lint script. |
-| `npm run format`    | Prettier over `**/*.{ts,tsx,md}`.                        |
-| `npm run build`     | `turbo run build`.                                       |
-| `npm run changeset` | Author a changeset.                                      |
-| `npm run dev`       | **Do not run.** Persistent watchers that never exit.     |
+| Command             | Effect                                                     |
+| ------------------- | ---------------------------------------------------------- |
+| `npm ci`            | Install. The default — see Toolchain below.                |
+| `npm run test`      | `turbo run test` → vitest in cache, docs, and image.       |
+| `npm run typecheck` | `turbo run typecheck` → `tsc --noEmit` in every package.   |
+| `npm run lint`      | `oxlint` over the whole repo. Not a turbo task.            |
+| `npm run format`    | `oxfmt` over the whole repo. `format:check` verifies only. |
+| `npm run build`     | `turbo run build`.                                         |
+| `npm run changeset` | Author a changeset.                                        |
+| `npm run dev`       | **Do not run.** Persistent watchers that never exit.       |
+
+Lint and format are single repo-wide binaries, not per-package turbo tasks. There is no
+`lint` script in any workspace and no `lint` task in `turbo.json`.
 
 ## Toolchain
 
-> **Several of these pins are temporary.** A parallel branch is bumping libraries. The
-> versions below record the current state so nothing is mistaken for intent — they are what
-> the repo pins today, not what it wants long-term. Expected to change: eslint + prettier
-> (→ oxlint/oxfmt), Tailwind v3 (→ v4), turbo 1.x (→ 2.x), node 20 (→ 24), React 18 (→ 19).
-> The harness pieces coupled to them land in a follow-up PR, not this one.
+Every dependency is pinned to an explicit range. Nothing resolves `latest`.
 
-- **node** 20.11.1 (`.nvmrc`), npm 10.2.4.
-- **turbo** — root `package.json` says `"turbo": "latest"`; the lockfile pins **1.12.4**.
-  `turbo.json` uses the v1 `pipeline` key, which turbo 2+ renamed to `tasks`. A fresh
-  `npm install` without the lockfile resolves `latest` and breaks every task. Use `npm ci`.
-  `render.yaml` runs `npm install` — a real hazard if the lockfile ever drifts.
-- **eslint** 8.56 + prettier 3.2, via `eslint-config-micro-image` (extends next, turbo, prettier).
-- **Tailwind** v3 in `apps/docs`, with `tailwindcss-radix-colors` (`disableSemantics: true`).
-  `@theme` is v4 syntax and does not exist here; tokens go in `theme.extend`.
-- **React** 18, Next.js pages router, tsup for the published packages.
+- **node** 24.18.0 (`.nvmrc`, `engines`), npm 11.16.0 (`packageManager`).
+- **turbo** 2.10.8. `turbo.json` uses the v2 `tasks` key; v1 called it `pipeline`. v2 also
+  dropped `globalDotEnv`, so `.env` is listed under `globalDependencies`.
+- **TypeScript** 7.0.2, the native port. It removed `baseUrl` and `moduleResolution: node10`
+  and requires an explicit `rootDir` when emitting. Next.js cannot use its compiler API, so
+  `apps/docs` sets `experimental.useTypeScriptCli`.
+- **oxlint** 1.76 (`.oxlintrc.json`) and **oxfmt** 0.61 (`.oxfmtrc.json`), replacing eslint
+  and prettier. `turbo/no-undeclared-env-vars` has no oxlint equivalent and is simply gone;
+  `turbo.json` `globalEnv` remains the only declaration of those vars.
+- **Tailwind** v4 in `apps/docs`, configured CSS-first in `src/globals.css`. There is no
+  `tailwind.config.js`. PostCSS loads `@tailwindcss/postcss`; autoprefixer is built in.
+  `tailwindcss-radix-colors` 2.x is a pure-CSS package with no JS plugin — the old
+  `disableSemantics: true` is now an import of `dist/all-colors-only.css`.
+- **React** 19, Next.js 16 pages router, **tsdown** for the published packages. Both publish
+  dual ESM/CJS behind an `exports` map and declare `"type": "module"`.
+- **vitest** 4 on Vite 8. `apps/cache` and `apps/docs` name their configs `vitest.config.mts`
+  because neither package is `"type": "module"` and Vite will not load an ESM `.ts` config.
+
+### Installing
+
+`npm ci` is the default: it installs exactly what the lockfile records and never rewrites it.
+Use `npm install` only when deliberately changing a dependency, then commit the lockfile it
+produces. `.claude/hooks/guard-write.sh` enforces that the lockfile is not hand-edited.
 
 ## Environment variables
 
