@@ -22,7 +22,7 @@
     "prettier": "^3.2.5",
     "turbo": "latest",
     "vite-node": "^1.6.1",
-    "vitest": "^1.6.1"
+    "vitest": "^4.1.10"
   },
   "packageManager": "npm@10.2.4",
   "workspaces": [
