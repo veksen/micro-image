@@ -187,19 +187,26 @@ describe("GET /cache — dead parameters [BUG-3, BUG-4, BUG-17]", () => {
   });
 });
 
-describe("GET /cache — animated-gif false positive, end to end [BUG-18]", () => {
-  it("returns a quality-100 jpeg completely unprocessed", async () => {
+describe("GET /cache — animated-gif handling, end to end [BUG-18]", () => {
+  it("processes a quality-100 jpeg rather than short-circuiting on it", async () => {
     const jpeg = await makeJpeg({ width: 800, height: 600, quality: 100 });
     origin = await startOrigin({ "/cat.jpg": { body: jpeg, contentType: "image/jpeg" } });
 
     const res = await get({ image: `${origin.url}/cat.jpg`, width: "100" });
-    const sharp = (await import("sharp")).default;
 
-    // isAnimatedGif said yes, so the route short-circuits: no resize, no
-    // compression, the full original is returned and cached under a key that
-    // claims it is 100px wide
-    expect(Buffer.compare(res.rawPayload, jpeg)).toBe(0);
-    expect((await sharp(res.rawPayload).metadata()).width).toBe(800);
+    // previously isAnimatedGif said yes, and the route returned the full
+    // original uncompressed under a cache key claiming it was 100px wide
+    expect(Buffer.compare(res.rawPayload, jpeg)).not.toBe(0);
+  });
+
+  it("still returns a real animated gif untouched", async () => {
+    const gif = makeGif({ delay: 10 });
+    origin = await startOrigin({ "/loop.gif": { body: gif, contentType: "image/gif" } });
+
+    const res = await get({ image: `${origin.url}/loop.gif`, width: "2" });
+
+    expect(res.statusCode).toBe(200);
+    expect(Buffer.compare(res.rawPayload, gif)).toBe(0);
   });
 });
 
@@ -218,11 +225,14 @@ describe("GET /cache — upstream headers [BUG-22]", () => {
 });
 
 /**
- * Undecodable bytes that still reach sharp. The obvious choice — an ASCII
- * string like "not an image at all" — does NOT work: byte 13 lands on 'a'
- * (0x61), which shares a bit with the 0x21 mask, so isAnimatedGif returns true
- * and the route hands the garbage straight back with a 200. An all-zero buffer
- * fails that guard at the first byte and so actually reaches sharp.
+ * Undecodable bytes that reach sharp.
+ *
+ * Before BUG-18 was fixed, the choice of bytes mattered here: an ASCII string
+ * like "not an image at all" was swallowed by the animated-gif false positive
+ * (byte 13 lands on 'a', 0x61, which shares a bit with the 0x21 mask) and handed
+ * straight back with a 200, never reaching sharp. Only an all-zero buffer got
+ * through. Now that the probe is gif-only and matches by equality, any
+ * undecodable payload reaches sharp.
  */
 const UNDECODABLE = Buffer.alloc(64);
 
@@ -238,16 +248,17 @@ describe("GET /cache — error handling [BUG-26]", () => {
     expect(res.statusCode).toBe(500);
   });
 
-  it("hands back undecodable ascii payloads with a 200 via the gif false positive", async () => {
+  it("no longer masks undecodable ascii payloads as animated gifs [BUG-18]", async () => {
     origin = await startOrigin({
       "/broken.png": { body: Buffer.from("not an image at all"), contentType: "image/png" },
     });
 
     const res = await get({ image: `${origin.url}/broken.png`, width: "100" });
 
-    // BUG-18 is broad enough to mask corrupt payloads as "animated gifs"
-    expect(res.statusCode).toBe(200);
-    expect(res.rawPayload.toString()).toBe("not an image at all");
+    // it used to come back 200 with the garbage intact. It now reaches sharp,
+    // which fails — the 500 is BUG-26, tracked separately
+    expect(res.statusCode).toBe(500);
+    expect(res.rawPayload.toString()).not.toBe("not an image at all");
   });
 
   it("returns a 500 when the origin is unreachable", async () => {
@@ -374,7 +385,7 @@ describe("bug ledger", () => {
     expect(res.headers["content-type"]).toContain("image/webp");
   });
 
-  it.fails("BUG-18: a quality-100 jpeg should still be resized and compressed", async () => {
+  it("BUG-18: a quality-100 jpeg should still be resized and compressed", async () => {
     const jpeg = await makeJpeg({ width: 800, height: 600, quality: 100 });
     origin = await startOrigin({ "/cat.jpg": { body: jpeg, contentType: "image/jpeg" } });
 

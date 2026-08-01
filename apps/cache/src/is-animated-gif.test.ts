@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { isAnimatedGif } from "./is-animated-gif";
+import { gifDelayTime, isAnimatedGif } from "./is-animated-gif";
 import { makeGif, makeJpeg, makePng } from "./test-helpers";
 
 describe("isAnimatedGif — real gifs", () => {
@@ -30,15 +30,12 @@ describe("isAnimatedGif — real gifs", () => {
 });
 
 /**
- * BUG-18 is materially worse than "theoretically possible". The route calls
- * isAnimatedGif on every supported mime with no `contentType === "image/gif"`
- * guard. For a JPEG, byte 10 — where this function expects the GIF logical
- * screen descriptor — is the first quantization-table entry, whose value is
- * determined by the encoder's quality setting.
- *
- * The guard `extensionIntroducer & 0x21 && graphicsControlLabel & 0xf9` uses
- * bitwise AND instead of equality, so it passes on any byte pair sharing a
- * single bit with those masks. Measured on 64x64 gradient JPEGs:
+ * BUG-18 was materially worse than "theoretically possible". The probe ran on
+ * every supported mime with no `contentType === "image/gif"` guard, and matched
+ * the extension bytes with bitwise AND rather than equality, so it passed on any
+ * byte pair sharing a single bit with the masks. For a JPEG, byte 10 — where the
+ * function expects the GIF logical screen descriptor — is the first
+ * quantization-table entry, whose value is set by encoder quality:
  *
  *   quality  byte10  intro  label  => detected as animated gif
  *   50       0x0e    0x10   0x0e   no
@@ -48,38 +45,32 @@ describe("isAnimatedGif — real gifs", () => {
  *   90       0x03    0x03   0x03   YES  (delay read as 1027)
  *   100      0x01    0x01   0x01   YES  (delay read as 257)
  *
- * A false positive means the route returns the ORIGINAL bytes uncompressed and
- * unresized, and caches that. See the end-to-end consequence in server.test.ts.
+ * A false positive meant the route returned the ORIGINAL bytes uncompressed and
+ * unresized, and cached that. The regressions below pin the fix.
  */
-describe("isAnimatedGif — false positives on non-gif input [BUG-18]", () => {
-  it("misidentifies a quality-100 jpeg as an animated gif", async () => {
-    expect(isAnimatedGif(await makeJpeg({ width: 64, height: 64 }))).toBe(true);
-  });
-
-  it("is decided purely by the jpeg quantization table, not by the image", async () => {
-    const detected: number[] = [];
-
-    for (const quality of [50, 60, 70, 75, 80, 85, 90, 95, 100]) {
-      const jpeg = await makeJpeg({ width: 64, height: 64, quality });
-      if (isAnimatedGif(jpeg)) detected.push(quality);
-    }
-
-    // same picture, same dimensions — only the encoder quality differs
-    expect(detected).toEqual([60, 90, 100]);
-  });
-
-  it("does not currently misfire on png", async () => {
+describe("isAnimatedGif — non-gif input [BUG-18]", () => {
+  it("rejects png", async () => {
     expect(isAnimatedGif(await makePng({ width: 64, height: 64 }))).toBe(false);
+  });
+
+  it("rejects bytes that are not an image at all", () => {
+    expect(isAnimatedGif(Buffer.from("not an image at all"))).toBe(false);
+  });
+
+  it("rejects an empty or truncated buffer instead of reading past the end", () => {
+    expect(isAnimatedGif(Buffer.alloc(0))).toBe(false);
+    expect(isAnimatedGif(Buffer.from("GIF89a", "ascii"))).toBe(false);
+    expect(isAnimatedGif(makeGif({ delay: 10 }).subarray(0, 20))).toBe(false);
   });
 });
 
 describe("bug ledger", () => {
-  it.fails("BUG-18: a jpeg should never be reported as an animated gif", async () => {
+  it("BUG-18: a jpeg should never be reported as an animated gif", async () => {
     const jpeg = await makeJpeg({ width: 64, height: 64, quality: 100 });
     expect(isAnimatedGif(jpeg)).toBe(false);
   });
 
-  it.fails("BUG-18: no jpeg quality should be reported as an animated gif", async () => {
+  it("BUG-18: no jpeg quality should be reported as an animated gif", async () => {
     const detected: number[] = [];
 
     for (const quality of [50, 60, 70, 75, 80, 85, 90, 95, 100]) {
@@ -90,7 +81,7 @@ describe("bug ledger", () => {
     expect(detected).toEqual([]);
   });
 
-  it.fails("BUG-18: extension bytes should be matched by equality, not bitwise AND", () => {
+  it("BUG-18: extension bytes should be matched by equality, not bitwise AND", () => {
     // 0x20/0xf8 are not GCE markers, but each shares a bit with the masks
     const gif = makeGif({ delay: 10 });
     const gceOffset = gif.indexOf(Buffer.from([0x21, 0xf9]));
@@ -102,15 +93,26 @@ describe("bug ledger", () => {
     expect(isAnimatedGif(gif)).toBe(false);
   });
 
-  it.fails("BUG-18b: delay time should be read little-endian per the GIF spec", () => {
-    // dv.getUint16(offset + 4) defaults to big-endian while GIF stores the
-    // delay little-endian. The boolean survives — any non-zero delay has a
-    // non-zero byte either way — but the value read is byte-swapped.
-    const gif = makeGif({ delay: 10 });
-    const gceOffset = gif.indexOf(Buffer.from([0x21, 0xf9]));
-    const ab = gif.buffer.slice(gif.byteOffset, gif.byteOffset + gif.byteLength) as ArrayBuffer;
-    const dv = new DataView(ab);
+  /**
+   * Rewritten, not merely flipped. The original ledger test built its own
+   * DataView over the fixture and asserted `dv.getUint16(gceOffset + 4) === 10`
+   * — an assertion about DataView's default endianness and the fixture, which
+   * never called the module under test. It could not have flipped no matter
+   * what the source did.
+   *
+   * Endianness is not observable through a boolean: a delay is non-zero either
+   * way round. So the decoded value is exported and asserted directly. 256 is
+   * the discriminating case — stored little-endian it is 0x00 0x01, which a
+   * big-endian read returns as 1.
+   */
+  it("BUG-18b: delay time should be read little-endian per the GIF spec", () => {
+    expect(gifDelayTime(makeGif({ delay: 10 }))).toBe(10);
+    expect(gifDelayTime(makeGif({ delay: 256 }))).toBe(256);
+  });
 
-    expect(dv.getUint16(gceOffset + 4)).toBe(10);
+  it("BUG-18b: a buffer with no delay to read reports no delay", () => {
+    expect(gifDelayTime(makeGif({ delay: 0 }))).toBe(0);
+    expect(gifDelayTime(makeGif({ graphicsControlExtension: false }))).toBeNull();
+    expect(gifDelayTime(Buffer.from("not an image at all"))).toBeNull();
   });
 });
