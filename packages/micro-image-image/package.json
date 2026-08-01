@@ -16,7 +16,8 @@
     "clean": "rm -rf .turbo && rm -rf node_modules && rm -rf dist",
     "prepack": "npm run build",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "bench": "vitest bench --run"
   },
   "devDependencies": {
     "@micro-image/tsconfig": "*",

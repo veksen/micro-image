@@ -1,0 +1,234 @@
+{
+  "capturedAt": "2026-08-01T21:08:31.747Z",
+  "iterations": 15,
+  "node": "v24.18.0",
+  "platform": "darwin-arm64",
+  "results": [
+    {
+      "name": "jpeg q80 -> 400w",
+      "contentType": "image/jpeg",
+      "query": {
+        "width": "400"
+      },
+      "originBytes": 212829,
+      "servedBytes": 8205,
+      "savedPercent": 96.14479229804209,
+      "passedThroughUnprocessed": false,
+      "coldMs": {
+        "mean": 15.153905533333319,
+        "p50": 13.552416999999878,
+        "p95": 36.8743750000001,
+        "min": 13.158582999999908,
+        "max": 36.8743750000001
+      },
+      "warmMs": {
+        "mean": 0.2534443333333305,
+        "p50": 0.26520799999980227,
+        "p95": 0.38837499999999636,
+        "min": 0.1512910000001284,
+        "max": 0.38837499999999636
+      },
+      "originFetchesPerRequest": 0.5,
+      "cacheControlOnHit": false,
+      "note": "the intended path: resize + recompress"
+    },
+    {
+      "name": "jpeg q100 -> 400w",
+      "contentType": "image/jpeg",
+      "query": {
+        "width": "400"
+      },
+      "originBytes": 1450007,
+      "servedBytes": 1450007,
+      "savedPercent": 0,
+      "passedThroughUnprocessed": true,
+      "coldMs": {
+        "mean": 19.34030279999997,
+        "p50": 18.864250000000084,
+        "p95": 22.368999999999687,
+        "min": 17.36895800000002,
+        "max": 22.368999999999687
+      },
+      "warmMs": {
+        "mean": 15.320855399999951,
+        "p50": 15.259708000000046,
+        "p95": 16.372457999999824,
+        "min": 14.59941600000002,
+        "max": 16.372457999999824
+      },
+      "originFetchesPerRequest": 0.5,
+      "cacheControlOnHit": false,
+      "note": "BUG-18: quantization table trips the gif check"
+    },
+    {
+      "name": "jpeg q60 -> 400w",
+      "contentType": "image/jpeg",
+      "query": {
+        "width": "400"
+      },
+      "originBytes": 65252,
+      "servedBytes": 65252,
+      "savedPercent": 0,
+      "passedThroughUnprocessed": true,
+      "coldMs": {
+        "mean": 2.130994466666713,
+        "p50": 1.7612919999996848,
+        "p95": 3.612333999999919,
+        "min": 1.1036250000001928,
+        "max": 3.612333999999919
+      },
+      "warmMs": {
+        "mean": 0.997286133333273,
+        "p50": 0.8936659999999392,
+        "p95": 2.0002919999997175,
+        "min": 0.7377089999999953,
+        "max": 2.0002919999997175
+      },
+      "originFetchesPerRequest": 0.5,
+      "cacheControlOnHit": false,
+      "note": "BUG-18: same, at a different quality"
+    },
+    {
+      "name": "jpeg q80 -> blur",
+      "contentType": "image/jpeg",
+      "query": {
+        "width": "400",
+        "blur": "true"
+      },
+      "originBytes": 212829,
+      "servedBytes": 6023,
+      "savedPercent": 97.17002852054935,
+      "passedThroughUnprocessed": false,
+      "coldMs": {
+        "mean": 15.252113866666695,
+        "p50": 14.876917000000049,
+        "p95": 21.975541999999678,
+        "min": 13.824084000000312,
+        "max": 21.975541999999678
+      },
+      "warmMs": {
+        "mean": 0.20484453333338024,
+        "p50": 0.19545800000014424,
+        "p95": 0.29450000000042564,
+        "min": 0.15774999999985084,
+        "max": 0.29450000000042564
+      },
+      "originFetchesPerRequest": 0.5,
+      "cacheControlOnHit": false,
+      "note": "blur radius is hardcoded to 10 server-side (BUG-2)"
+    },
+    {
+      "name": "png 800x600 -> 400w",
+      "contentType": "image/png",
+      "query": {
+        "width": "400"
+      },
+      "originBytes": 1256689,
+      "servedBytes": 321220,
+      "savedPercent": 74.439181054342,
+      "passedThroughUnprocessed": false,
+      "coldMs": {
+        "mean": 18.89011406666665,
+        "p50": 18.53779200000008,
+        "p95": 20.302416999999878,
+        "min": 18.061709000000064,
+        "max": 20.302416999999878
+      },
+      "warmMs": {
+        "mean": 3.4687999999999497,
+        "p50": 3.4413330000002134,
+        "p95": 3.7356250000002547,
+        "min": 3.3391670000000886,
+        "max": 3.7356250000002547
+      },
+      "originFetchesPerRequest": 0.5,
+      "cacheControlOnHit": false
+    },
+    {
+      "name": "webp 800x600 -> 400w",
+      "contentType": "image/webp",
+      "query": {
+        "width": "400"
+      },
+      "originBytes": 65112,
+      "servedBytes": 8196,
+      "savedPercent": 87.41245853298932,
+      "passedThroughUnprocessed": false,
+      "coldMs": {
+        "mean": 14.44008893333333,
+        "p50": 14.430917000000136,
+        "p95": 15.020416000000296,
+        "min": 13.758291999999983,
+        "max": 15.020416000000296
+      },
+      "warmMs": {
+        "mean": 0.23540833333333164,
+        "p50": 0.22699999999986176,
+        "p95": 0.3327910000002703,
+        "min": 0.18383399999993344,
+        "max": 0.3327910000002703
+      },
+      "originFetchesPerRequest": 0.5,
+      "cacheControlOnHit": false
+    },
+    {
+      "name": "animated gif",
+      "contentType": "image/gif",
+      "query": {
+        "width": "400"
+      },
+      "originBytes": 66,
+      "servedBytes": 66,
+      "savedPercent": 0,
+      "passedThroughUnprocessed": true,
+      "coldMs": {
+        "mean": 0.25241926666667497,
+        "p50": 0.22329100000024482,
+        "p95": 0.5551669999999831,
+        "min": 0.21258299999999508,
+        "max": 0.5551669999999831
+      },
+      "warmMs": {
+        "mean": 0.03976933333339427,
+        "p50": 0.03916700000036144,
+        "p95": 0.05166600000029575,
+        "min": 0.03479099999958635,
+        "max": 0.05166600000029575
+      },
+      "originFetchesPerRequest": 0.5,
+      "cacheControlOnHit": false,
+      "note": "correctly passed through untouched"
+    },
+    {
+      "name": "svg (unsupported)",
+      "contentType": "image/svg+xml",
+      "query": {},
+      "originBytes": 103,
+      "servedBytes": 103,
+      "savedPercent": 0,
+      "passedThroughUnprocessed": true,
+      "coldMs": {
+        "mean": 0.24482213333324884,
+        "p50": 0.2233339999997952,
+        "p95": 0.3423339999999371,
+        "min": 0.20187499999974534,
+        "max": 0.3423339999999371
+      },
+      "warmMs": {
+        "mean": 0.2643972666666438,
+        "p50": 0.24320799999986775,
+        "p95": 0.3785419999999249,
+        "min": 0.20383399999991525,
+        "max": 0.3785419999999249
+      },
+      "originFetchesPerRequest": 1,
+      "cacheControlOnHit": true,
+      "note": "BUG-21: never cached, refetched every request"
+    }
+  ],
+  "herd": {
+    "concurrency": 8,
+    "upstreamFetches": 8,
+    "wallMs": 35.99479199999996
+  }
+}
