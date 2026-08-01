@@ -35,3 +35,16 @@ export function toCache(id: string, record: CacheRecord): void {
     buffer: record.buffer,
   };
 }
+
+/** Test/benchmark affordance: the module-level cache is a singleton, so suites
+ * need a way to isolate from one another. Not used by the server itself. */
+export function clearCache(): void {
+  for (const key of Object.keys(cache)) {
+    delete cache[key];
+  }
+}
+
+/** Test/benchmark affordance: number of entries currently held in memory. */
+export function cacheSize(): number {
+  return Object.keys(cache).length;
+}
