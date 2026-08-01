@@ -23,7 +23,7 @@
     "@micro-image/tsconfig": "*",
     "eslint": "^8.56.0",
     "eslint-config-micro-image": "*",
-    "@types/react": "^18.2.21",
+    "@types/react": "^19.2.18",
     "@types/react-dom": "^18.2.7",
     "tsup": "^7.2.0",
     "typescript": "^7.0.2"

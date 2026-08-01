@@ -22,7 +22,7 @@
   "devDependencies": {
     "@micro-image/tsconfig": "*",
     "@types/node": "^20.11.19",
-    "@types/react": "^18.2.21",
+    "@types/react": "^19.2.18",
     "@types/react-dom": "^18.2.7",
     "autoprefixer": "^10.4.17",
     "eslint-config-micro-image": "*",
