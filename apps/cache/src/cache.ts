@@ -5,24 +5,32 @@ interface CacheRecord {
 
 const cache: Record<string, CacheRecord> = {};
 
-interface CompressOptions {
+/**
+ * Everything that can change the bytes the proxy returns. Two requests differing
+ * in any of these must not share an entry; two differing in nothing else must.
+ */
+export interface CacheKeyOptions {
   width?: number;
-  blur?: boolean;
+  quality?: number;
+  format?: string;
+  blur?: number;
 }
 
-export function buildId(url: string, options: CompressOptions): string {
-  const optionsArray = Object.entries(options)
-    .filter(([key, value]) => {
-      if (key === "blur") {
-        return value === true;
-      }
-      return true;
-    })
-    .map(([key, value]) => {
-      return `${key}-${value}`;
-    });
+/**
+ * Cache id for a source url and the options that affect its output.
+ *
+ * Keys are sorted, so a caller cannot cause a miss by reordering its object
+ * literal. `undefined` values are dropped, so an option that was absent and one
+ * that parsed to nothing produce the same id, which is correct because they
+ * produce the same bytes.
+ */
+export function buildId(url: string, options: CacheKeyOptions = {}): string {
+  const parts = Object.entries(options)
+    .filter(([, value]) => value !== undefined)
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([key, value]) => `${key}-${value}`);
 
-  return `${url}__${optionsArray.join("__")}`;
+  return parts.length > 0 ? `${url}__${parts.join("__")}` : url;
 }
 
 export function fromCache(id: string): CacheRecord | undefined {
