@@ -32,6 +32,10 @@
           {
             "type": "command",
             "command": ".claude/hooks/block-direct-tools.sh"
+          },
+          {
+            "type": "command",
+            "command": ".claude/hooks/block-hard-wrapped-body.sh"
           }
         ]
       }
