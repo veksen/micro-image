@@ -19,45 +19,57 @@ describe("ipx generateUrl — current behaviour", () => {
     expect(generateUrl({ url: URL_BASE, src: SIMPLE_SRC, blur: 5 })).toContain("blur_5");
   });
 
-  it("appends the source url after the modifier segment", () => {
-    expect(generateUrl({ url: URL_BASE, src: SIMPLE_SRC, width: 300 }).endsWith(SIMPLE_SRC)).toBe(
-      true
+  it("appends the encoded source url after the modifier segment", () => {
+    expect(
+      generateUrl({ url: URL_BASE, src: SIMPLE_SRC, width: 300 }).endsWith(
+        encodeURIComponent(SIMPLE_SRC)
+      )
+    ).toBe(true);
+  });
+
+  it("emits the `_` no-op modifier segment when no transform was requested", () => {
+    // ipx answers 400 IPX_MISSING_MODIFIERS on an empty first path segment.
+    expect(generateUrl({ url: URL_BASE, src: SIMPLE_SRC })).toBe(
+      `${URL_BASE}/_/${encodeURIComponent(SIMPLE_SRC)}`
     );
   });
 
-  it("emits a bogus image_ modifier containing the whole encoded source [BUG-28]", () => {
-    // ipx modifiers are transforms (w_, h_, q_, f_). There is no `image_`
-    // modifier; ipx takes the source from the path segment after the
-    // modifiers, which this generator also emits. The source is sent twice.
-    const url = generateUrl({ url: URL_BASE, src: SIMPLE_SRC, width: 300 });
+  it("encodes modifier values, so a format string cannot inject a second modifier", () => {
+    const url = generateUrl({ url: URL_BASE, src: SIMPLE_SRC, format: "webp,width_9000" });
 
-    expect(url).toBe(`${URL_BASE}/image_${encodeURIComponent(SIMPLE_SRC)},width_300/${SIMPLE_SRC}`);
+    const [modifiers] = url.slice(`${URL_BASE}/`.length).split("/");
+
+    expect(modifiers).toBe("format_webp%2Cwidth_9000");
+    expect(modifiers?.split(",")).toHaveLength(1);
   });
 
-  it("appends the source url unencoded, leaking its query string [BUG-29]", () => {
-    const url = generateUrl({ url: URL_BASE, src: SRC });
+  it("round-trips the source through ipx's decode of the id segment", () => {
+    const url = generateUrl({ url: URL_BASE, src: SRC, width: 300 });
 
-    // "?v=1" stays live in the final url, so ipx sees v=1 as its own query
-    // param rather than as part of the source address
-    expect(url.endsWith("/https://example.com/photos/cat.jpg?v=1")).toBe(true);
-    expect(url.indexOf("?")).toBeLessThan(url.length - 1);
+    // ipx: [modifiers, ...idSegments] = path.split("/"); id = decode(idSegments.join("/"))
+    const [, ...idSegments] = url.slice(`${URL_BASE}/`.length).split("/");
+    expect(decodeURIComponent(idSegments.join("/"))).toBe(SRC);
   });
 });
 
 describe("bug ledger", () => {
-  it.fails("BUG-28: no image_ modifier should be emitted", () => {
+  it("BUG-28: no image_ modifier should be emitted", () => {
     expect(generateUrl({ url: URL_BASE, src: SIMPLE_SRC, width: 300 })).not.toContain("image_");
   });
 
-  it.fails("BUG-28: modifiers should be only the requested transforms", () => {
+  it("BUG-28: modifiers should be only the requested transforms", () => {
     expect(generateUrl({ url: URL_BASE, src: SIMPLE_SRC, width: 300 })).toBe(
       `${URL_BASE}/width_300/${encodeURIComponent(SIMPLE_SRC)}`
     );
   });
 
-  it.fails("BUG-29: the source url should be encoded in the path segment", () => {
+  it("BUG-29: the source url should be encoded in the path segment", () => {
     const url = generateUrl({ url: URL_BASE, src: SRC });
 
     expect(url.endsWith(encodeURIComponent(SRC))).toBe(true);
+  });
+
+  it("BUG-29: the source query string does not become the ipx request's own", () => {
+    expect(new URL(generateUrl({ url: URL_BASE, src: SRC })).search).toBe("");
   });
 });

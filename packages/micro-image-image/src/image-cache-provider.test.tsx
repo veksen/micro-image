@@ -35,7 +35,9 @@ describe("useImageCacheConfig — current behaviour", () => {
   it("selects the ipx generator", () => {
     const config = configIn({ provider: "ipx", cacheProxyUrl: "http://ipx" });
 
-    expect(config.generateUrl({ url: "http://ipx", src: SRC })).toContain("image_");
+    expect(config.generateUrl({ url: "http://ipx", src: SRC, width: 300 })).toContain(
+      "/width_300/"
+    );
   });
 
   it("selects the imgproxy generator", () => {

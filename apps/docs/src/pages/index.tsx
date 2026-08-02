@@ -196,12 +196,6 @@ export default function DocsIndex() {
           </p>
         )}
       </section>
-
-      <section className="max-w-[100%]">
-        <h2 className="text-lg font-bold">(TODO): Image from ipx</h2>
-        <p>Using `bliss.jpg`, stored inside ipx assets:</p>
-        <Image src="bliss.jpg" width={800} height={500} alt="" objectFit="cover" />
-      </section>
     </>
   );
 }
