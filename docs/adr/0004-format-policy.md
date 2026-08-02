@@ -57,5 +57,13 @@ What ratification would still require:
 - The cache key must then include the **resolved** format rather than the requested one, and
   responses need `Vary: Accept`. Keying on the request alone would let a WebP answer a client
   that did not accept it.
+- **`Vary: Accept` conflicts with the `immutable` currently in `cacheControl`.** RFC 9110 §12.5.5
+  makes `Vary` expand the cache key; `immutable` asserts the response never changes. A shared
+  cache may resolve that pair badly, and CDN-specific behaviour here is unresearched. Settle it
+  before ratifying — see `docs/research/image-format-coverage.md` §10.
+- Negotiation must parse media ranges per §12.5.1 precedence, not substring-match. Every shipping
+  engine terminates its image `Accept` with `image/*;q=0.8` or `*/*;q=0.5`, which formally matches
+  AVIF at a lower weight — so `header.includes("image/avif")` is wrong. Safari also announces
+  `image/heic`, which this build cannot decode, and Lockdown Mode announces only WebP.
 - `?format=auto` is deliberately unimplemented and reserved for exactly that meaning. It is
   not a synonym for the source format — `?format=original` is.
