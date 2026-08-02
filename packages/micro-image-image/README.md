@@ -36,11 +36,17 @@ Note: The image will always take 100% of the width of the parent, that's intende
 
 `generatorOptions`: optional, passed through to the provider when it builds each URL.
 
-- `quality`: encoder quality, 1 to 100. Defaults to 75. Values outside the range are clamped.
-  Applies to JPEG and WebP output; PNG and GIF stay lossless.
-- `format`: the format to encode to — `jpg`, `jpeg`, `png`, `webp` or `gif`. Omit it to keep
-  the source format, or pass `original` to ask for that explicitly. Any other value is
+- `quality`: encoder quality, 1 to 100. Values outside the range are clamped. `<Image>` sends 75
+  when you do not set one. Applies to JPEG, WebP and AVIF output; PNG and GIF stay lossless.
+- `format`: the format to encode to — `jpg`, `jpeg`, `png`, `webp`, `avif` or `gif`. Omit it to
+  keep the source format, or pass `original` to ask for that explicitly. Any other value is
   rejected with a 400.
+
+  **With `format: "avif"`, set `quality: 50` too.** The proxy encodes AVIF at 50 when a request
+  names no quality, but `<Image>` always names one, so that default never reaches it. AVIF at 75
+  is _larger_ than the JPEG it replaces — 8,663 bytes against 8,205 on the benchmark photo —
+  while AVIF at 50 is 4,990.
+
 - `blur`: blur radius. Omit it for no blur.
 
 ```js

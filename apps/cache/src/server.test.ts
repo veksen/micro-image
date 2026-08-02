@@ -6,6 +6,8 @@ import {
   legacyBlurRadius,
   resolveResponseMime,
   fallbackMime,
+  avifQuality,
+  avifEffort,
 } from "./server";
 import { clearCache } from "./cache";
 import { makeGif, makeJpeg, makePng, startOrigin, type Origin } from "./test-helpers";
@@ -265,6 +267,95 @@ describe("GET /cache — transform parameters [BUG-3, BUG-4, BUG-2]", () => {
 
     expect(res.headers["content-type"]).toContain("image/webp");
     expect((await sharp(res.rawPayload).metadata()).format).toBe("webp");
+  });
+});
+
+/**
+ * AVIF output (#55).
+ *
+ * `metadata().format` reports `"heif"` for an AVIF file, not `"avif"`: AVIF is
+ * an AV1-coded HEIF, and sharp reports the container. `compression: "av1"` is
+ * what actually distinguishes it from a HEVC-coded HEIC, so that is what these
+ * assertions read.
+ */
+describe("GET /cache — AVIF output", () => {
+  const photo = () => makeJpeg({ width: 400, height: 300, quality: 80 });
+
+  it("returns an avif for ?format=avif", async () => {
+    origin = await startOrigin({ "/cat.jpg": { body: await photo(), contentType: "image/jpeg" } });
+
+    const res = await get({ image: `${origin.url}/cat.jpg`, width: "200", format: "avif" });
+    const sharp = (await import("sharp")).default;
+    const meta = await sharp(res.rawPayload).metadata();
+
+    expect(res.statusCode).toBe(200);
+    expect(res.headers["content-type"]).toContain("image/avif");
+    expect(meta.format).toBe("heif");
+    expect(meta.compression).toBe("av1");
+  });
+
+  it("encodes at quality 50, effort 4 when the request asks for no quality", async () => {
+    const jpeg = await photo();
+    origin = await startOrigin({ "/cat.jpg": { body: jpeg, contentType: "image/jpeg" } });
+
+    const res = await get({ image: `${origin.url}/cat.jpg`, width: "200", format: "avif" });
+
+    // Byte-compared against the settings this pins rather than asserted loosely.
+    // The alternatives are not merely worse: quality 75 is LARGER than the jpeg
+    // the proxy would otherwise have served, and effort 0/2 are larger than
+    // effort 4. A size assertion would pass on any of them.
+    //
+    // The pipeline is rebuilt here rather than reusing `compress`, so the test
+    // does not assert the code under test against itself. That makes it a
+    // deliberate copy of `compress`'s resize step: if a stage is ever added
+    // there, add it here too or this stops meaning what it claims. The two
+    // toBe() assertions below are what pin the constants themselves, since
+    // `expected` is built from them and would otherwise follow them anywhere.
+    const sharp = (await import("sharp")).default;
+    const expected = await sharp(jpeg)
+      .resize({ width: 200, withoutEnlargement: true })
+      .avif({ quality: avifQuality, effort: avifEffort })
+      .toBuffer();
+
+    expect(avifQuality).toBe(50);
+    expect(avifEffort).toBe(4);
+    expect(Buffer.compare(res.rawPayload, expected)).toBe(0);
+  });
+
+  it("lets an explicit ?quality= override the avif default", async () => {
+    origin = await startOrigin({ "/cat.jpg": { body: await photo(), contentType: "image/jpeg" } });
+
+    const asked = await get({
+      image: `${origin.url}/cat.jpg`,
+      width: "200",
+      format: "avif",
+      quality: "90",
+    });
+    const defaulted = await get({ image: `${origin.url}/cat.jpg`, width: "200", format: "avif" });
+
+    expect(Buffer.compare(asked.rawPayload, defaulted.rawPayload)).not.toBe(0);
+  });
+
+  it("does not share a cache entry with another requested format", async () => {
+    origin = await startOrigin({ "/cat.jpg": { body: await photo(), contentType: "image/jpeg" } });
+
+    const avif = await get({ image: `${origin.url}/cat.jpg`, width: "200", format: "avif" });
+    const webp = await get({ image: `${origin.url}/cat.jpg`, width: "200", format: "webp" });
+
+    // the second request must not be answered with the first's bytes under its
+    // own mime, which is what a format-blind key would have done
+    expect(avif.headers["content-type"]).toContain("image/avif");
+    expect(webp.headers["content-type"]).toContain("image/webp");
+    expect(Buffer.compare(avif.rawPayload, webp.rawPayload)).not.toBe(0);
+  });
+
+  it("lists avif among the formats it will encode", async () => {
+    origin = await startOrigin({ "/cat.jpg": { body: await photo(), contentType: "image/jpeg" } });
+
+    const res = await get({ image: `${origin.url}/cat.jpg`, format: "bmp" });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json().supported).toContain("avif");
   });
 });
 

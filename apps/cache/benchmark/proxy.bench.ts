@@ -189,6 +189,14 @@ async function buildScenarios(): Promise<Scenario[]> {
       note: "format conversion and explicit quality, both honoured since #9",
     },
     {
+      name: "jpeg -> avif",
+      path: "/convert-avif.jpg",
+      body: await photoJpeg({ ...big, quality: 80 }),
+      contentType: "image/jpeg",
+      query: { width: "400", format: "avif" },
+      note: "no quality param on purpose: this measures the shipped avif defaults",
+    },
+    {
       name: "png 800x600 -> 400w",
       path: "/photo.png",
       body: await photoPng({ width: 800, height: 600 }),
