@@ -22,7 +22,7 @@ The consequences — what this makes easy, what it makes hard, what we gave up.>
 
 ## Status lifecycle
 
-- `proposed` — drafted, not yet ratified. **Six of the ADRs here are proposed.** They are
+- `proposed` — drafted, not yet ratified. **Eight of the ADRs here are proposed.** They are
   open questions from `VISION.md`, each with a suggested default that has not been ratified.
   Resolve one before writing code that assumes its answer, rather than settling it implicitly.
 - `blocked` — the decision cannot be made yet, because it rests on something not known. Say
