@@ -250,9 +250,48 @@ to run the benchmark on the merge base and the PR head in the same job and
 compare the two, which cancels out runner variance. Neither is worth it while
 the headline numbers are dominated by a single unfixed bug.
 
-## Baseline reading, and what fixes should do to it
+## The baseline
 
-Captured on darwin-arm64, node v24.18.0, 15 iterations.
+`baseline.json` is what `Δ served` and `Δ cold*` compare against. It answers
+"did this change make anything worse", so it tracks the current good state, not
+a historical one.
+
+It was retaken once the proxy backlog landed. Before that it held the pre-fix
+numbers, which made `Δ served` read -99.4% on every run forever: true, but
+history rather than a regression check. A column that permanently celebrates a
+past win cannot tell you a pull request broke something.
+
+Nothing was lost in retaking it. The pre-fix measurement is the first entry in
+`history.jsonl`, recorded from commit `da9fc4a` with full raw samples, and the
+table below is kept for the same reason.
+
+**Retake it when a deliberate change makes the numbers legitimately different**,
+using `--save-baseline`, and say so in the pull request that does. Never retake
+it to silence a delta you have not explained.
+
+### Current baseline
+
+Captured on darwin-arm64, node v24.18.0, 15 iterations, after the proxy fixes.
+
+| scenario             | origin kB | served kB | saved % |
+| -------------------- | --------- | --------- | ------- |
+| jpeg q80 -> 400w     | 207.8     | 8.0       | 96.1%   |
+| jpeg q100 -> 400w    | 1416.0    | 7.9       | 99.4%   |
+| jpeg q60 -> 400w     | 63.7      | 8.1       | 87.3%   |
+| jpeg q80 -> blur     | 207.8     | 5.9       | 97.2%   |
+| jpeg -> webp @q50    | 207.8     | 4.4       | 97.9%   |
+| png 800x600 -> 400w  | 1227.2    | 313.7     | 74.4%   |
+| webp 800x600 -> 400w | 63.6      | 6.3       | 90.2%   |
+| animated gif         | 0.1       | 0.1       | 0.0%    |
+| svg (unsupported)    | 0.1       | 0.1       | 0.0%    |
+
+All three behavioural counters read zero: nothing transformable comes back
+unprocessed, every response carries `Cache-Control`, and eight concurrent cold
+requests cause one upstream fetch.
+
+## Historic: the pre-fix baseline, and what the fixes did to it
+
+Captured on darwin-arm64, node v24.18.0, 15 iterations, before any fix landed.
 
 | scenario             | origin kB | served kB | saved % | cold ms | warm ms |
 | -------------------- | --------- | --------- | ------- | ------- | ------- |
