@@ -88,6 +88,9 @@ Every dependency is pinned to an explicit range. Nothing resolves `latest`.
   dual ESM/CJS behind an `exports` map and declare `"type": "module"`.
 - **vitest** 4 on Vite 8. `apps/cache` and `apps/docs` name their configs `vitest.config.mts`
   because neither package is `"type": "module"` and Vite will not load an ESM `.ts` config.
+- **rolldown** 1.2, a devDependency of `packages/micro-image-image` only. It is the bundler
+  tsdown already runs; it is declared explicitly there because `tree-shaking.test.ts` and
+  `scripts/provider-size.mjs` import it directly rather than relying on hoisting.
 
 ### Installing
 

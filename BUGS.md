@@ -170,6 +170,22 @@ Five defects not in the original report, numbered from 28 to avoid collision.
 > generates returns 200 with an image at the requested width, and the URL shape
 > this replaced returns 403.
 
+## Bugs found by a research issue
+
+| #   | Bug                                                                                                                                                                                                              | Test                   |
+| --- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------- |
+| 35  | every consumer ships every provider: `getGeneralUrlFunction` selects with a `switch` over a runtime string, which no bundler can shake, so a micro-image-only consumer carries the ipx and imgproxy URL builders | `tree-shaking.test.ts` |
+
+Costs a one-provider consumer 598–825 B minified, 178–290 B gzip, and grows by 300–410 B
+minified per provider added. Run `npm run size -w @micro-image/image` to reproduce those
+numbers. It nearly doubled when #11 and #12 made the imgproxy and ipx URLs correct, without a
+provider being added. The ledger test asserts rolldown's module graph rather than a byte budget,
+so it fails
+the day the fix lands and not before, and it reads the provider list off disk so a newly added
+provider is covered without editing it. The fix is a breaking change to a published API and is
+gated on [ADR 0011](docs/adr/0011-provider-selection.md), which is still `proposed` — see
+[#40](https://github.com/veksen/micro-image/issues/40).
+
 ## Coverage
 
 | #   | Bug                                                                 | Test file                                                   | Ledger                                                             |
@@ -208,6 +224,7 @@ Five defects not in the original report, numbered from 28 to avoid collision.
 | 32  | imgproxy source not escaped outside printable ASCII                 | `providers/imgproxy.test.ts`                                | **fixed** ([#11](https://github.com/veksen/micro-image/issues/11)) |
 | 33  | every looping gif is flattened to one frame (see correction)        | `is-animated.test.ts`, `server.test.ts`                     | **fixed** ([#52](https://github.com/veksen/micro-image/issues/52)) |
 | 34  | animated webp has no guard at all, so it is flattened too           | `is-animated.test.ts`, `server.test.ts`                     | **fixed** ([#52](https://github.com/veksen/micro-image/issues/52)) |
+| 35  | every consumer ships every provider                                 | `tree-shaking.test.ts`                                      | yes                                                                |
 
 ### Deliberately untested
 
@@ -230,6 +247,7 @@ apps/docs/src/             image-utils.test.ts, components/compare.component.tes
                            __tests__/api-meta.test.ts
 packages/micro-image-image/src/  providers/*.test.ts, use-image.hook.test.tsx,
                                  image.component.test.tsx, image-cache-provider.test.tsx
+                                 tree-shaking.test.ts   the entry graph, not one module
 ```
 
 `apps/docs/src/__tests__/api-meta.test.ts` lives outside `pages/` on purpose —

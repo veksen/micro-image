@@ -31,12 +31,14 @@
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "test:watch": "vitest",
-    "bench": "vitest bench --run"
+    "bench": "vitest bench --run",
+    "size": "node scripts/provider-size.mjs"
   },
   "devDependencies": {
     "@micro-image/tsconfig": "*",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.4",
+    "rolldown": "^1.2.1",
     "tsdown": "^0.22.14",
     "typescript": "^7.0.2"
   },
