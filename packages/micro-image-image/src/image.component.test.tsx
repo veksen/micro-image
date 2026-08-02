@@ -23,13 +23,6 @@ function renderImage(props: Partial<React.ComponentProps<typeof Image>> = {}) {
   return { ...result, img: () => result.container.querySelector("img") };
 }
 
-/** Flush the requestAnimationFrame the resize callback defers to. */
-async function flushFrame() {
-  await act(async () => {
-    await new Promise((resolve) => requestAnimationFrame(() => resolve(null)));
-  });
-}
-
 describe("Image — rendering", () => {
   it("renders an img with the alt text", () => {
     const { img } = renderImage();
@@ -79,8 +72,8 @@ describe("Image — rendering", () => {
   });
 });
 
-describe("Image — initial paint has no srcset [BUG-10]", () => {
-  it("renders the blurred 500px placeholder as the only src", () => {
+describe("Image — first paint", () => {
+  it("keeps the blurred placeholder as the src for browsers without srcset", () => {
     const { img } = renderImage();
 
     expect(img()!.getAttribute("src")).toBe(
@@ -88,39 +81,8 @@ describe("Image — initial paint has no srcset [BUG-10]", () => {
     );
   });
 
-  it("ships no srcset and no sizes attribute on first paint", () => {
+  it("generates 19 srcset candidates from 100w to 1900w", () => {
     const { img } = renderImage();
-
-    // the preload scanner sees only the placeholder; the real variant cannot
-    // start until React mounts and the ResizeObserver fires
-    expect(img()!.getAttribute("srcset")).toBeNull();
-    expect(img()!.getAttribute("sizes")).toBeNull();
-  });
-
-  it("only sets srcset and sizes after a resize is observed", async () => {
-    const { img } = renderImage();
-
-    act(() => FakeResizeObserver.instances[0]!.resizeTo(640));
-    await flushFrame();
-
-    expect(img()!.sizes).toBe("700px");
-    expect(img()!.srcset).toContain("100w");
-  });
-
-  it("rounds the observed width up to the next 100px bucket", async () => {
-    const { img } = renderImage();
-
-    act(() => FakeResizeObserver.instances[0]!.resizeTo(601));
-    await flushFrame();
-
-    expect(img()!.sizes).toBe("700px");
-  });
-
-  it("generates 19 srcset candidates from 100w to 1900w", async () => {
-    const { img } = renderImage();
-
-    act(() => FakeResizeObserver.instances[0]!.resizeTo(640));
-    await flushFrame();
 
     const candidates = img()!.srcset.split(", ");
     expect(candidates).toHaveLength(19);
@@ -128,13 +90,68 @@ describe("Image — initial paint has no srcset [BUG-10]", () => {
     expect(candidates[18]).toContain(" 1900w");
   });
 
-  it("puts the requested width into each srcset candidate url", async () => {
+  it("puts the requested width into each srcset candidate url", () => {
+    const { img } = renderImage();
+
+    expect(img()!.srcset).toContain("width=100&quality=75");
+  });
+
+  it("loads lazily by default, which is what makes sizes=auto legal", () => {
+    const { img } = renderImage();
+
+    expect(img()!.getAttribute("loading")).toBe("lazy");
+    expect(img()!.getAttribute("sizes")).toBe("auto, 100vw");
+  });
+
+  it("drops the auto keyword when the caller asks to load eagerly", () => {
+    const { img } = renderImage({ loading: "eager" });
+
+    // `auto` is ignored on a non-lazy image, so advertising it would mislead
+    expect(img()!.getAttribute("loading")).toBe("eager");
+    expect(img()!.getAttribute("sizes")).toBe("100vw");
+  });
+});
+
+describe("Image — sizes refinement", () => {
+  it("narrows sizes to the observed container width", () => {
     const { img } = renderImage();
 
     act(() => FakeResizeObserver.instances[0]!.resizeTo(640));
-    await flushFrame();
 
-    expect(img()!.srcset).toContain("width=100&quality=75");
+    expect(img()!.getAttribute("sizes")).toBe("700px");
+  });
+
+  it("rounds the observed width up to the next 100px bucket", () => {
+    const { img } = renderImage();
+
+    act(() => FakeResizeObserver.instances[0]!.resizeTo(601));
+
+    expect(img()!.getAttribute("sizes")).toBe("700px");
+  });
+
+  it("ignores a zero width rather than asking for the 100w candidate", () => {
+    const { img } = renderImage();
+
+    act(() => FakeResizeObserver.instances[0]!.resizeTo(0));
+
+    expect(img()!.getAttribute("sizes")).toBe("auto, 100vw");
+  });
+
+  it("honours an explicit sizes prop and does not observe at all", () => {
+    const { img } = renderImage({ sizes: "(max-width: 40em) 100vw, 40em" });
+
+    expect(img()!.getAttribute("sizes")).toBe("(max-width: 40em) 100vw, 40em");
+    expect(FakeResizeObserver.instances).toHaveLength(0);
+  });
+
+  it("survives a re-render, because sizes and srcset are props not DOM writes", () => {
+    const { img, rerender } = renderImage();
+
+    act(() => FakeResizeObserver.instances[0]!.resizeTo(640));
+    rerender(<Image src={SRC} width={800} height={600} alt="a cat" />);
+
+    expect(img()!.getAttribute("sizes")).toBe("700px");
+    expect(img()!.srcset).toContain(" 100w");
   });
 });
 
@@ -156,11 +173,8 @@ describe("Image — the discarded preflight fetch [BUG-1]", () => {
     expect(FakeImage.instances[0]!.src).not.toBe(img()!.getAttribute("src"));
   });
 
-  it("does not appear in the srcset either, so the bytes are pure waste", async () => {
+  it("does not appear in the srcset either, so the bytes are pure waste", () => {
     const { img } = renderImage();
-
-    act(() => FakeResizeObserver.instances[0]!.resizeTo(640));
-    await flushFrame();
 
     expect(img()!.srcset).not.toContain(FakeImage.instances[0]!.src);
   });
@@ -185,13 +199,13 @@ describe("Image — load state is not used [BUG-9]", () => {
 });
 
 describe("bug ledger", () => {
-  it.fails("BUG-10: first paint should carry a srcset for the preload scanner", () => {
+  it("BUG-10: first paint should carry a srcset for the preload scanner", () => {
     const { img } = renderImage();
 
     expect(img()!.getAttribute("srcset")).not.toBeNull();
   });
 
-  it.fails("BUG-10: first paint should carry a sizes attribute", () => {
+  it("BUG-10: first paint should carry a sizes attribute", () => {
     const { img } = renderImage();
 
     expect(img()!.getAttribute("sizes")).not.toBeNull();
