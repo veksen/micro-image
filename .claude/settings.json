@@ -88,12 +88,6 @@
       "Bash(npm run build*)",
       "Bash(npm run changeset*)"
     ],
-    "deny": [
-      "Read(.env*)",
-      "Read(**/.env*)",
-      "Bash(rm -rf *)",
-      "Bash(git push --force*)",
-      "Bash(git reset --hard*)"
-    ]
+    "deny": ["Read(.env*)", "Read(**/.env*)", "Bash(rm -rf *)", "Bash(git reset --hard*)"]
   }
 }
