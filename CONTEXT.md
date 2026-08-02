@@ -106,6 +106,12 @@ and not the other is silently `undefined` in the deployed docs site. Currently f
 `render.yaml` defines three services: the cache proxy (node), the docs site (node), and
 imgproxy (docker, `apps/imgproxy/Dockerfile`, with `IMGPROXY_KEY`/`IMGPROXY_SALT` unsynced).
 
+The imgproxy provider generates **unsigned** URLs — it emits the literal `insecure` in the
+signature position, because computing the HMAC would mean shipping the key to the browser. So
+that imgproxy service has to run with no key and no salt set; setting either one makes it
+reject everything `@micro-image/image` generates. The docs showcase renders its imgproxy
+section only when `NEXT_PUBLIC_IMGPROXY_URL` is set, and says so when it is not.
+
 ## Known bugs
 
 `BUGS.md` is the ledger. Read it before fixing anything in the proxy or the component — every

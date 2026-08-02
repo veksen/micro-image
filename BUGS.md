@@ -112,7 +112,7 @@ such.
 
 ## Bugs found while writing the tests
 
-Four defects not in the original report, numbered from 28 to avoid collision.
+Five defects not in the original report, numbered from 28 to avoid collision.
 
 | #   | Bug                                                                                                                                                                 | Test                         |
 | --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------- |
@@ -120,6 +120,26 @@ Four defects not in the original report, numbered from 28 to avoid collision.
 | 29  | ipx appends the source **unencoded**, so a source with `?v=1` leaks its query string into the ipx request                                                           | `providers/ipx.test.ts`      |
 | 30  | imgproxy uses `btoa` (standard base64, padded) where imgproxy requires unpadded **base64url**; `=`, `+` and `/` land in the path                                    | `providers/imgproxy.test.ts` |
 | 31  | imgproxy URLs carry no signature segment and no `/insecure/` prefix, so no imgproxy deployment will accept them                                                     | `providers/imgproxy.test.ts` |
+| 32  | imgproxy refuses a source carrying a raw non-ASCII or control character, so the provider has to percent-encode those before the base64                              | `providers/imgproxy.test.ts` |
+
+> **BUG-30, BUG-31 and BUG-32 fixed with BUG-6** — see
+> [#11](https://github.com/veksen/micro-image/issues/11). The source is now
+> unpadded base64url, the signature position always carries `insecure`, and each
+> processing option is built from its own arguments so a missing one cannot emit
+> `undefined`.
+>
+> BUG-32 was found while verifying the other three, and only shows up against a
+> running instance: imgproxy decodes the base64 and hands the source straight to
+> its HTTP client, which refuses anything outside printable ASCII with
+> `Source is unreachable` before it fetches. Printable ASCII is left raw, which
+> was measured rather than assumed — a stock instance accepts space, `<`, `>`,
+> `|` and the rest, and escaping `%` would double-escape an already-escaped
+> source.
+>
+> Verified against a stock `darthsim/imgproxy` container and the deployed
+> instance the docs showcase points at: every URL shape the `<Image>` component
+> generates returns 200 with an image at the requested width, and the URL shape
+> this replaced returns 403.
 
 ## Coverage
 
@@ -130,7 +150,7 @@ Four defects not in the original report, numbered from 28 to avoid collision.
 | 3   | `quality` accepted by the client, ignored by the proxy              | `server.test.ts`                                            | **fixed** ([#9](https://github.com/veksen/micro-image/issues/9))   |
 | 4   | `format` accepted by the client, ignored by the proxy               | `server.test.ts`                                            | **fixed** ([#9](https://github.com/veksen/micro-image/issues/9))   |
 | 5   | `generateUrl` always emits `blur=false`                             | `providers/micro-image.test.ts`                             | **fixed** ([#9](https://github.com/veksen/micro-image/issues/9))   |
-| 6   | imgproxy single-element option arrays are correct by accident       | `providers/imgproxy.test.ts`                                | yes                                                                |
+| 6   | imgproxy single-element option arrays are correct by accident       | `providers/imgproxy.test.ts`                                | **fixed** ([#11](https://github.com/veksen/micro-image/issues/11)) |
 | 7   | duplicate `if (!imageRef.current) return;`                          | —                                                           | **fixed** ([#15](https://github.com/veksen/micro-image/issues/15)) |
 | 8   | `useImage` cleanup calls `removeEventListener` on property handlers | `use-image.hook.test.tsx`                                   | yes                                                                |
 | 9   | `loaded` / `fetching` returned but never gate rendering             | `image.component.test.tsx`                                  | yes                                                                |
@@ -154,8 +174,9 @@ Four defects not in the original report, numbered from 28 to avoid collision.
 | 27  | quality / format / blur advertised but silently dropped             | covered by 2, 3, 4                                          | **fixed** ([#9](https://github.com/veksen/micro-image/issues/9))   |
 | 28  | ipx bogus `image_` modifier                                         | `providers/ipx.test.ts`                                     | yes                                                                |
 | 29  | ipx unencoded source URL                                            | `providers/ipx.test.ts`                                     | yes                                                                |
-| 30  | imgproxy standard base64 instead of base64url                       | `providers/imgproxy.test.ts`                                | yes                                                                |
-| 31  | imgproxy missing signature / `insecure` segment                     | `providers/imgproxy.test.ts`                                | yes                                                                |
+| 30  | imgproxy standard base64 instead of base64url                       | `providers/imgproxy.test.ts`                                | **fixed** ([#11](https://github.com/veksen/micro-image/issues/11)) |
+| 31  | imgproxy missing signature / `insecure` segment                     | `providers/imgproxy.test.ts`                                | **fixed** ([#11](https://github.com/veksen/micro-image/issues/11)) |
+| 32  | imgproxy source not escaped outside printable ASCII                 | `providers/imgproxy.test.ts`                                | **fixed** ([#11](https://github.com/veksen/micro-image/issues/11)) |
 
 ### Deliberately untested
 

@@ -169,22 +169,33 @@ export default function DocsIndex() {
         </section>
       </ImageCacheProvider>
 
-      <ImageCacheProvider provider="imgproxy" cacheProxyUrl={process.env.NEXT_PUBLIC_IMGPROXY_URL}>
-        <section>
-          <h2 className="text-lg font-bold">Remote image using imgproxy</h2>
-          <p>Using `https://picsum.photos/id/66/1500/900`:</p>
+      <section>
+        <h2 className="text-lg font-bold">Remote image using imgproxy</h2>
+        {process.env.NEXT_PUBLIC_IMGPROXY_URL ? (
+          <ImageCacheProvider
+            provider="imgproxy"
+            cacheProxyUrl={process.env.NEXT_PUBLIC_IMGPROXY_URL}
+          >
+            <p>Using `https://picsum.photos/id/66/1500/900`:</p>
 
-          <Compare originalSrc="https://picsum.photos/id/66/1500/900">
-            <Image
-              src="https://picsum.photos/id/66/1500/900"
-              width={300}
-              height={200}
-              alt=""
-              objectFit="cover"
-            />
-          </Compare>
-        </section>
-      </ImageCacheProvider>
+            <Compare originalSrc="https://picsum.photos/id/66/1500/900">
+              <Image
+                src="https://picsum.photos/id/66/1500/900"
+                width={300}
+                height={200}
+                alt=""
+                objectFit="cover"
+              />
+            </Compare>
+          </ImageCacheProvider>
+        ) : (
+          <p className="mt-2 bg-mauve-3 dark:bg-mauvedark-3 text-mauve-12 dark:text-mauvedark-12 p-4 rounded-lg">
+            Point <code>NEXT_PUBLIC_IMGPROXY_URL</code> at an imgproxy instance to render this
+            example. micro-image generates unsigned URLs, so that instance has to run with no{" "}
+            <code>IMGPROXY_KEY</code> and no <code>IMGPROXY_SALT</code>.
+          </p>
+        )}
+      </section>
 
       <section className="max-w-[100%]">
         <h2 className="text-lg font-bold">(TODO): Image from ipx</h2>
