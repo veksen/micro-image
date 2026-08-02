@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import type { FastifyInstance } from "fastify";
 import {
   buildServer,
+  compress,
   parseCacheOptions,
   legacyBlurRadius,
   resolveResponseMime,
@@ -12,10 +13,12 @@ import {
 import { clearCache } from "./cache";
 import {
   makeAnimatedWebp,
+  makeApng,
   makeJpeg,
   makeLoopingGif,
   makePng,
   makeSharpAnimatedGif,
+  pngChunkTypes,
   startOrigin,
   type Origin,
 } from "./test-helpers";
@@ -452,6 +455,80 @@ describe("GET /cache — animation handling, end to end [BUG-18, #52]", () => {
 
     const sharp = (await import("sharp")).default;
     expect((await sharp(res.rawPayload).metadata()).width).toBe(16);
+  });
+
+  /**
+   * APNG (#53). It arrives labelled `image/png` because it *is* a PNG, so it
+   * passes `isSupported()` and reaches the transform like any still image.
+   *
+   * Passthrough is the fix rather than a stopgap: libvips cannot decode or
+   * encode APNG, so there is nothing to resize it with and nothing to transcode
+   * it to. ADR 0010 records that as deliberate.
+   */
+  it("keeps every frame of an apng", async () => {
+    const apng = makeApng({ frames: 12 });
+    origin = await startOrigin({ "/loop.png": { body: apng, contentType: "image/png" } });
+
+    const res = await get({ image: `${origin.url}/loop.png`, width: "4" });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.headers["content-type"]).toContain("image/png");
+    expect(await frameCount(res.rawPayload)).toBe(12);
+    expect(Buffer.compare(res.rawPayload, apng)).toBe(0);
+  });
+
+  it("keeps the apng animation chunks intact on the wire", async () => {
+    // frameCount reads the acTL, so asserting it alone would pass on a file that
+    // kept the acTL and lost every fdAT. These are the chunks that carry the
+    // frames (§11.3.6.2, §11.3.6.3).
+    const apng = makeApng({ frames: 12 });
+    origin = await startOrigin({ "/loop.png": { body: apng, contentType: "image/png" } });
+
+    const res = await get({ image: `${origin.url}/loop.png`, width: "4" });
+    const types = pngChunkTypes(res.rawPayload);
+    const count = (type: string) => types.filter((each) => each === type).length;
+
+    expect(count("acTL")).toBe(1);
+    expect(count("fcTL")).toBe(12);
+    expect(count("fdAT")).toBe(11);
+  });
+
+  it("costs one origin fetch however many times an apng is requested", async () => {
+    const apng = makeApng({ frames: 12 });
+    origin = await startOrigin({ "/loop.png": { body: apng, contentType: "image/png" } });
+
+    await get({ image: `${origin.url}/loop.png`, width: "4" });
+    const hit = await get({ image: `${origin.url}/loop.png`, width: "4" });
+
+    expect(origin.hits["/loop.png"]).toBe(1);
+    expect(Buffer.compare(hit.rawPayload, apng)).toBe(0);
+  });
+
+  it("still resizes a still png", async () => {
+    // the guard must not widen into "every png is passed through"
+    const png = makeApng({ frames: 12, size: 64, animationControl: false });
+    origin = await startOrigin({ "/still.png": { body: png, contentType: "image/png" } });
+
+    const res = await get({ image: `${origin.url}/still.png`, width: "16" });
+
+    const sharp = (await import("sharp")).default;
+    expect((await sharp(res.rawPayload).metadata()).width).toBe(16);
+  });
+
+  /**
+   * Why the guard has to sit upstream of `compress()` rather than inside it.
+   *
+   * This is the loss the route now avoids, asserted against the transform
+   * directly. It is not a claim about what the proxy returns — the tests above
+   * cover that — but about why the transform can never be handed an APNG.
+   */
+  it("documents that the transform itself still flattens an apng", async () => {
+    const apng = makeApng({ frames: 12 });
+
+    const flattened = await compress(apng, { contentType: "image/png", width: 4 });
+
+    expect(await frameCount(flattened)).toBe(1);
+    expect(flattened.indexOf("acTL", 0, "ascii")).toBe(-1);
   });
 });
 

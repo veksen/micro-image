@@ -1,4 +1,5 @@
 import http from "http";
+import zlib from "zlib";
 import type { AddressInfo } from "net";
 import sharp from "sharp";
 
@@ -266,6 +267,174 @@ export function makeLoopingGif(options: MakeLoopingGifOptions = {}): Buffer {
   parts.push(Buffer.from([0x3b])); // trailer
 
   return Buffer.concat(parts);
+}
+
+export interface MakeApngOptions {
+  /** Number of frames. Must be at least 2 for the result to be animated. */
+  frames?: number;
+  /** Square edge length in pixels. */
+  size?: number;
+  /** Frame delay numerator, in `delayDen`ths of a second. */
+  delayNum?: number;
+  /** Frame delay denominator. The spec reads 0 as 100. */
+  delayDen?: number;
+  /**
+   * Emit the `acTL` chunk. Off produces a still PNG from the same builder, so a
+   * test can vary animation alone and hold every other byte pattern constant.
+   */
+  animationControl?: boolean;
+}
+
+/**
+ * One PNG chunk: length, type, data, CRC-32 over type and data.
+ *
+ * `zlib.crc32` is Node's own (>= 22.2), so the CRCs are not a reimplementation
+ * that could agree with a matching mistake in the reader.
+ *
+ * Exported so a test can plant a *well-formed* chunk rather than splicing loose
+ * bytes into a file. Splicing shifts every chunk after the cut and corrupts the
+ * length prefixes, which makes the resulting fixture prove nothing about how a
+ * reader handles a chunk in that position.
+ */
+export function pngChunk(type: string, data: Buffer): Buffer {
+  const length = Buffer.alloc(4);
+  length.writeUInt32BE(data.length, 0);
+
+  const typeAndData = Buffer.concat([Buffer.from(type, "ascii"), data]);
+
+  const crc = Buffer.alloc(4);
+  crc.writeUInt32BE(zlib.crc32(typeAndData), 0);
+
+  return Buffer.concat([length, typeAndData, crc]);
+}
+
+/** Truecolour scanlines, each prefixed with filter type 0 (None), deflated. */
+function pngImageData(size: number, frame: number): Buffer {
+  const raw = Buffer.alloc(size * (1 + size * 3));
+  let offset = 0;
+
+  for (let y = 0; y < size; y++) {
+    raw[offset++] = 0; // filter type: None
+    for (let x = 0; x < size; x++) {
+      // the frame index drives red, so no two frames are byte-identical
+      raw[offset++] = (frame * 47) % 256;
+      raw[offset++] = Math.floor((x / size) * 255);
+      raw[offset++] = Math.floor((y / size) * 255);
+    }
+  }
+
+  return zlib.deflateSync(raw);
+}
+
+/**
+ * A real APNG, assembled here because nothing in the toolchain can write one.
+ *
+ * sharp cannot: a filmstrip with `raw.pageHeight` set, whose metadata reports
+ * `pages` before encoding, comes out of `png()` as a single tall stack with zero
+ * `acTL` chunks. libvips has no APNG code in either direction — `vipspng.c`,
+ * `pngload.c` and `spngload.c` at v8.18.3 contain no reference to it — which is
+ * also why the proxy cannot resize one and has to pass it through.
+ *
+ * Chunk order is the one PNG Third Edition prescribes:
+ * `IHDR acTL fcTL IDAT (fcTL fdAT)*n IEND`. The single `fcTL` before `IDAT` is
+ * what makes the static image serve as frame 0 (§11.3.6.1); without it the
+ * static image is not part of the animation at all. Sequence numbers run
+ * unbroken across every `fcTL` and `fdAT`, which the spec requires.
+ */
+export function makeApng(options: MakeApngOptions = {}): Buffer {
+  const { frames = 12, size = 8, delayNum = 1, delayDen = 10, animationControl = true } = options;
+
+  const parts: Buffer[] = [Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])];
+
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(size, 0); // width
+  ihdr.writeUInt32BE(size, 4); // height
+  ihdr.writeUInt8(8, 8); // bit depth
+  ihdr.writeUInt8(2, 9); // colour type 2: truecolour
+  ihdr.writeUInt8(0, 10); // compression: deflate
+  ihdr.writeUInt8(0, 11); // filter: adaptive
+  ihdr.writeUInt8(0, 12); // interlace: none
+  parts.push(pngChunk("IHDR", ihdr));
+
+  // The acTL must precede the first IDAT (PNG 3rd ed §11.3.6.1). That ordering
+  // is the whole detection signal.
+  if (animationControl) {
+    const actl = Buffer.alloc(8);
+    actl.writeUInt32BE(frames, 0); // num_frames
+    actl.writeUInt32BE(0, 4); // num_plays: 0 loops forever
+    parts.push(pngChunk("acTL", actl));
+  }
+
+  let sequence = 0;
+
+  const frameControl = () => {
+    const fctl = Buffer.alloc(26);
+    fctl.writeUInt32BE(sequence++, 0); // sequence_number
+    fctl.writeUInt32BE(size, 4); // width
+    fctl.writeUInt32BE(size, 8); // height
+    fctl.writeUInt32BE(0, 12); // x_offset
+    fctl.writeUInt32BE(0, 16); // y_offset
+    fctl.writeUInt16BE(delayNum, 20);
+    fctl.writeUInt16BE(delayDen, 22);
+    fctl.writeUInt8(0, 24); // dispose_op: NONE
+    fctl.writeUInt8(0, 25); // blend_op: SOURCE
+    return pngChunk("fcTL", fctl);
+  };
+
+  if (animationControl) {
+    parts.push(frameControl());
+  }
+  parts.push(pngChunk("IDAT", pngImageData(size, 0)));
+
+  if (animationControl) {
+    for (let frame = 1; frame < frames; frame++) {
+      parts.push(frameControl());
+
+      // fdAT carries the same deflated scanlines as IDAT, behind a sequence number
+      const sequenceNumber = Buffer.alloc(4);
+      sequenceNumber.writeUInt32BE(sequence++, 0);
+      parts.push(pngChunk("fdAT", Buffer.concat([sequenceNumber, pngImageData(size, frame)])));
+    }
+  }
+
+  parts.push(pngChunk("IEND", Buffer.alloc(0)));
+
+  return Buffer.concat(parts);
+}
+
+/**
+ * Every chunk type in a PNG, in file order.
+ *
+ * Walks the length prefixes rather than searching for the four type bytes. A
+ * search would count a `fdAT` that happens to occur inside deflated pixel data,
+ * so it could report an animation surviving when it had not — the assertion
+ * failing open, which is the worst way for a test about lost frames to be wrong.
+ */
+export function pngChunkTypes(buffer: Buffer): string[] {
+  const types: string[] = [];
+  let offset = 8; // past the signature
+
+  while (offset + 8 <= buffer.length) {
+    const length = buffer.readUInt32BE(offset);
+    types.push(buffer.toString("ascii", offset + 4, offset + 8));
+    offset += 12 + length;
+  }
+
+  return types;
+}
+
+/**
+ * Splices a well-formed chunk in immediately before the first `IDAT`.
+ *
+ * Everything downstream keeps its own valid length prefix, so the result is a
+ * file a conforming reader would still parse — which is what makes it a fair
+ * test of where a reader looks rather than of how it copes with damage.
+ */
+export function insertPngChunkBeforeIdat(png: Buffer, chunk: Buffer): Buffer {
+  // back up 4 bytes from the type to the chunk's own length field
+  const idatStart = png.indexOf(Buffer.from("IDAT", "ascii")) - 4;
+
+  return Buffer.concat([png.subarray(0, idatStart), chunk, png.subarray(idatStart)]);
 }
 
 /**
