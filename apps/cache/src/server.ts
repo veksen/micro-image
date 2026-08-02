@@ -152,6 +152,33 @@ export function resolveOutputMime(format: string | undefined, upstreamMime: stri
   return formatMimes[format] ?? upstreamMime;
 }
 
+/**
+ * What the proxy is willing to claim a response is.
+ *
+ * The upstream content type is attacker-influenced: the proxy fetches whatever
+ * URL it is given, and relaying that header verbatim means asserting a type it
+ * never checked. A missing header also reached the wire as the literal string
+ * "undefined".
+ *
+ * Only well-formed image types are relayed, and only their bare type — a
+ * charset or boundary parameter on an image is meaningless and is dropped.
+ * Anything else resolves to the neutral binary type, which is honest: the
+ * proxy has bytes it will serve but no type it is prepared to vouch for.
+ */
+export const fallbackMime = "application/octet-stream";
+
+const imageMimePattern = /^image\/[a-z0-9][a-z0-9.+-]*$/;
+
+export function resolveResponseMime(upstream: string | undefined): string {
+  if (!upstream) {
+    return fallbackMime;
+  }
+
+  const bare = upstream.split(";")[0]!.trim().toLowerCase();
+
+  return imageMimePattern.test(bare) ? bare : fallbackMime;
+}
+
 export function imageFromMime(image: sharp.Sharp, mime?: string, quality?: number): sharp.Sharp {
   const effectiveQuality = quality ?? 75;
 
@@ -235,12 +262,22 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
     }
 
     const id = buildId(request.query.image, requested);
+
+    // Every successful response leaves through here, so the caching policy
+    // cannot drift between branches again. It previously lived on three of the
+    // four exits, and the one it was missing from was the cache hit — the path
+    // most real traffic takes.
+    const send = (contentType: string, body: Buffer) => {
+      reply.type(contentType).code(200);
+      reply.header("Cache-Control", cacheControl);
+      return body;
+    };
+
     const cached = fromCache(id);
 
     // found in cache, use it and return
     if (cached) {
-      reply.type(cached.contentType).code(200);
-      return cached.buffer;
+      return send(cached.contentType, cached.buffer);
     }
 
     // Concurrent requests that reach here for the same id share one download
@@ -249,18 +286,21 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
     const result = await coalesce(id, async () => {
       const image = await downloadImage(request.query.image);
 
-      // axios types response header values as `AxiosHeaderValue | undefined`; older
-      // typings resolved this to `string`. Cast rather than coerce so the runtime
-      // path is byte-for-byte what it was — including BUG-22, where an upstream
-      // content-type is relayed with no validation.
-      const upstreamContentType = image.headers["content-type"] as string;
+      // axios types response header values as `AxiosHeaderValue | undefined`.
+      // What reaches the wire is whatever resolveResponseMime is willing to
+      // vouch for, never the raw header.
+      const upstreamContentType = resolveResponseMime(
+        image.headers["content-type"] as string | undefined
+      );
 
-      // not supported, return as is.
-      // Deliberately still not written to the cache: that is BUG-21, tracked by
-      // its own ledger test and issue, and fixing it here would flip a test that
-      // belongs to another change.
+      // Not transformable, so relay it. It is cached too: the proxy is willing
+      // to serve these bytes repeatedly, and an SVG that re-downloads from the
+      // origin on every request is the same upstream load the cache exists to
+      // remove.
       if (!isSupported(upstreamContentType)) {
-        return { contentType: upstreamContentType, body: image.data as Buffer };
+        const body = image.data as Buffer;
+        toCache(id, { contentType: upstreamContentType, buffer: body });
+        return { contentType: upstreamContentType, body };
       }
 
       const imageBuffer = Buffer.from(image.data, "binary");
@@ -306,9 +346,7 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
       return { contentType: servedMime, body: imageBufferToUse };
     });
 
-    reply.type(result.contentType).code(200);
-    reply.header("Cache-Control", cacheControl);
-    return result.body;
+    return send(result.contentType, result.body);
   });
 
   return fastify;

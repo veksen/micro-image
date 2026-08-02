@@ -183,7 +183,7 @@ async function buildScenarios(): Promise<Scenario[]> {
       ),
       contentType: "image/svg+xml",
       query: {},
-      note: "BUG-21: never cached, refetched every request",
+      note: "relayed untransformed, and cached so it costs one upstream fetch",
     },
   ];
 }
@@ -512,7 +512,7 @@ function report(
   }
 
   const retained = [...results].sort((a, b) => b.retainedBytesPerEntry - a.retainedBytesPerEntry);
-  console.log("\nmemory retained per cached variant (nothing ever evicts it):");
+  console.log("\nmemory retained per cached variant:");
   for (const r of retained.slice(0, 3)) {
     console.log(`  ${r.name.padEnd(22)} ${kb(r.retainedBytesPerEntry)} kB per entry`);
   }
@@ -521,7 +521,7 @@ function report(
   if (best.retainedBytesPerEntry > 0) {
     console.log(
       `  worst is ${(worst.retainedBytesPerEntry / best.retainedBytesPerEntry).toFixed(0)}x the smallest, ` +
-        `so an unprocessed passthrough poisons the cache budget too`
+        `so the byte budget fills at very different rates depending on the mix`
     );
   }
 }
