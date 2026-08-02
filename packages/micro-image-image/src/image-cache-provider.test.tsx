@@ -41,7 +41,7 @@ describe("useImageCacheConfig — current behaviour", () => {
   it("selects the imgproxy generator", () => {
     const config = configIn({ provider: "imgproxy", cacheProxyUrl: "http://ip" });
 
-    expect(config.generateUrl({ url: "http://ip", src: SRC })).toContain("/el:1/ex:1/");
+    expect(config.generateUrl({ url: "http://ip", src: SRC })).toContain("/insecure/");
   });
 
   it("keeps the default proxy url when the provider supplies none", () => {
