@@ -45,6 +45,32 @@ const APPEND_HISTORY = process.argv.includes("--append-history");
  */
 const BYTE_TOLERANCE = 0.001;
 
+/**
+ * Calibration cancels machine speed. It does not cancel everything.
+ *
+ * Measured by running an unchanged commit on darwin-arm64 against a CI Linux
+ * runner: raw milliseconds moved +50% to +73% on every scenario, and the
+ * calibrated ratio moved by up to about 25%. So calibration removes most of the
+ * cross-machine difference and leaves a quarter of it, from scheduling, cache
+ * behaviour and a libvips build that is not identical.
+ *
+ * The tolerance is set from that measurement rather than chosen. A tighter one
+ * reports hardware as a regression, which is the failure this column exists to
+ * stop.
+ */
+const TIMING_TOLERANCE = 0.25;
+
+/**
+ * Below this, a scenario is not worth comparing.
+ *
+ * The passthrough scenarios finish in well under a millisecond and perform no
+ * sharp work at all, so dividing them by a sharp calibration is the wrong
+ * denominator: they measure fixed per-request overhead, which does not scale
+ * with the reference workload. On CI they swung 52% and 85% while doing nothing
+ * differently.
+ */
+const TIMING_FLOOR_MS = 2;
+
 interface Scenario {
   name: string;
   path: string;
@@ -409,6 +435,25 @@ function delta(current: number, previous: number, tolerance = 0): string {
   return `${change > 0 ? "+" : ""}${(change * 100).toFixed(1)}%`.padStart(8);
 }
 
+/**
+ * Cold-time change against the baseline, compared as calibrated ratios and
+ * suppressed where the scenario is too fast for the comparison to mean
+ * anything.
+ */
+function calibratedDelta(current: ScenarioResult, before?: ScenarioResult): string {
+  if (!before || before.coldRatio === undefined || current.coldRatio === undefined) {
+    return "n/a";
+  }
+  // Both sides, not either. A scenario that was trivial and is now substantial
+  // has changed in the way most worth reporting: the quality-60 jpeg went from
+  // 1.8ms to 10.5ms when it stopped being passed through unprocessed.
+  if (current.coldMs.p50 < TIMING_FLOOR_MS && before.coldMs.p50 < TIMING_FLOOR_MS) {
+    return "too fast";
+  }
+
+  return delta(current.coldRatio, before.coldRatio, TIMING_TOLERANCE);
+}
+
 function report(
   results: ScenarioResult[],
   herd: Awaited<ReturnType<typeof runHerdScenario>>,
@@ -429,7 +474,7 @@ function report(
   const columns = ["scenario".padEnd(22), "origin kB", "served kB", "saved %".padStart(8)];
   if (baseline) columns.push("Δ served");
   columns.push("cold ms", "cold cpu", "warm ms");
-  if (baseline) columns.push("Δ cold");
+  if (baseline) columns.push("Δ cold*");
 
   const header = columns.join("  ");
   console.log(header);
@@ -448,15 +493,26 @@ function report(
     }
     row.push(ms(r.coldMs.p50), ms(r.coldCpuMs.p50), ms(r.warmMs.p50));
     if (baseline) {
-      row.push(before ? delta(r.coldMs.p50, before.coldMs.p50) : "     new");
+      // Compared as a ratio against each run's own calibration, not as raw ms.
+      // Raw ms across machines measures the machine: the same unchanged code
+      // read +50% to +73% on a CI runner purely for being slower hardware,
+      // which looks exactly like a regression.
+      row.push(calibratedDelta(r, before).padStart(8));
     }
     console.log(row.join("  "));
   }
 
   if (baseline) {
+    const samePlatform = baseline.platform === `${process.platform}-${process.arch}`;
     console.log(
-      "\nΔ served is deterministic and meaningful. Δ cold is wall-clock on this\n" +
-        "machine and will move on its own; read it as a trend, not a result."
+      `\nΔ served is deterministic. Δ cold* is calibrated: each timing is divided\n` +
+        `by a fixed reference workload measured in the same run, so it compares\n` +
+        `across machines. Raw cold/warm ms are this machine only.` +
+        (samePlatform
+          ? ""
+          : `\nBaseline came from ${baseline.platform}; this ran on ` +
+            `${process.platform}-${process.arch}, which is exactly the case the\n` +
+            `calibration exists for.`)
     );
   }
 
@@ -555,6 +611,7 @@ function writeSummary(
   const head = ["scenario", "origin kB", "served kB", "saved %"];
   if (baseline) head.push("Δ served");
   head.push("cold ms", "cold cpu", "warm ms", "retained kB");
+  if (baseline) head.push("Δ cold*");
   lines.push(`| ${head.join(" | ")} |`);
   lines.push(`| ${head.map(() => "---").join(" | ")} |`);
 
@@ -571,6 +628,9 @@ function writeSummary(
     }
     row.push(r.coldMs.p50.toFixed(2), r.coldCpuMs.p50.toFixed(2), r.warmMs.p50.toFixed(2));
     row.push((r.retainedBytesPerEntry / 1024).toFixed(1));
+    if (baseline) {
+      row.push(calibratedDelta(r, before).trim());
+    }
     lines.push(`| ${row.join(" | ")} |`);
   }
 
@@ -598,8 +658,11 @@ function writeSummary(
   );
   lines.push("");
   lines.push(
-    "_Timings are wall-clock on a shared runner and move on their own. " +
-      "Only byte counts and the counts above are reproducible._"
+    "_`Δ cold*` is calibrated: each timing is divided by a fixed reference " +
+      "workload measured in the same run, so it survives being compared across " +
+      "machines. Raw `cold ms` / `cold cpu` / `warm ms` are this runner only and " +
+      "will differ from the baseline for reasons that are not the code. Byte " +
+      "counts and the counts above reproduce exactly._"
   );
 
   const markdown = lines.join("\n") + "\n";

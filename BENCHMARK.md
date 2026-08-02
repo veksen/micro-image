@@ -119,6 +119,31 @@ The trend report prints the calibration spread across the window it is showing,
 so a run on unusually slow hardware is visible rather than mistaken for a
 regression.
 
+The comparison column uses these ratios, not raw milliseconds. `Δ cold*` divides
+each timing by that run's own calibration before comparing, so a run on slower
+hardware reads as unchanged rather than as a regression. Raw `cold ms` and
+`warm ms` are still printed, but they describe the machine that produced them
+and nothing else.
+
+A 25% tolerance applies to `Δ cold*`, set from measurement rather than chosen.
+Running an unchanged commit on darwin-arm64 against a CI Linux runner moved raw
+milliseconds by +50% to +73% on every scenario, and moved the calibrated ratio
+by up to about 25%. Calibration removes most of the cross-machine difference and
+leaves roughly a quarter of it, from scheduling, cache behaviour and a libvips
+build that is not identical. A tighter tolerance reports hardware as a
+regression, which is the failure this column exists to prevent.
+
+Scenarios where both the current run and the baseline finish in under 2ms report
+`too fast` instead of a percentage. The passthrough scenarios do no sharp work
+at all, so dividing them by a sharp calibration is the wrong denominator: they
+measure fixed per-request overhead, which does not scale with the reference
+workload. On CI they swung 52% and 85% while doing nothing differently.
+
+The floor requires _both_ sides to be trivial. A scenario that was fast and is
+now slow has changed in the way most worth reporting: the quality-60 jpeg went
+from 1.8ms to 10.5ms when it stopped being passed through unprocessed, and that
+reads as +853%, not as `too fast`.
+
 ## Memory and CPU
 
 Four of the open issues are resource bugs, so bytes and wall-clock alone cannot
