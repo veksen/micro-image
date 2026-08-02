@@ -23,6 +23,7 @@ import { clearCache, cacheBytes, cacheSize, cacheMaxBytes, setCacheMaxBytes } fr
 import { execFileSync } from "child_process";
 import os from "os";
 import { makeGif, startOrigin, type Origin } from "../src/test-helpers";
+import { supportedMimes } from "../src/server";
 import { photoJpeg, photoPng, photoWebp } from "./fixtures";
 import { calibrate, type Calibration } from "./calibration";
 
@@ -178,6 +179,14 @@ async function buildScenarios(): Promise<Scenario[]> {
       contentType: "image/jpeg",
       query: { width: "400", blur: "true" },
       note: "blur radius is hardcoded to 10 server-side (BUG-2)",
+    },
+    {
+      name: "jpeg -> webp @q50",
+      path: "/convert.jpg",
+      body: await photoJpeg({ ...big, quality: 80 }),
+      contentType: "image/jpeg",
+      query: { width: "400", format: "webp", quality: "50" },
+      note: "format conversion and explicit quality, both honoured since #9",
     },
     {
       name: "png 800x600 -> 400w",
@@ -440,6 +449,48 @@ function delta(current: number, previous: number, tolerance = 0): string {
  * suppressed where the scenario is too fast for the comparison to mean
  * anything.
  */
+/**
+ * The derived figures both renderers report.
+ *
+ * These used to be computed twice, once in the console report and once in the
+ * markdown summary. They drifted: a fix to the "unprocessed" filter and a
+ * change of units landed in the console copy only, and CI published the stale
+ * markdown for a release. Deriving them once is the fix.
+ */
+interface Counters {
+  unprocessed: ScenarioResult[];
+  noCacheControl: ScenarioResult[];
+  refetched: ScenarioResult[];
+  total: number;
+}
+
+function deriveCounters(results: ScenarioResult[]): Counters {
+  return {
+    // Relaying an animated gif or an untransformable type untouched is correct,
+    // not a defect. Only a type the proxy CAN transform coming back
+    // byte-identical is worth flagging.
+    unprocessed: results.filter(
+      (r) =>
+        r.passedThroughUnprocessed &&
+        supportedMimes.includes(r.contentType) &&
+        r.contentType !== "image/gif"
+    ),
+    noCacheControl: results.filter((r) => !r.cacheControlOnHit),
+    refetched: results.filter((r) => r.originFetchesPerRequest > 0.5),
+    total: results.length,
+  };
+}
+
+/** One phrasing of the cache-pressure result, in one set of units. */
+function describePressure(pressure: Awaited<ReturnType<typeof runCachePressureScenario>>): string {
+  return (
+    `${(pressure.retainedBytes / 1024).toFixed(0)} kB retained from ` +
+    `${(pressure.unboundedBytes / 1024).toFixed(0)} kB requested across ` +
+    `${pressure.distinctKeys} distinct keys, against a ` +
+    `${(pressure.budgetBytes / 1024).toFixed(0)} kB budget`
+  );
+}
+
 function calibratedDelta(current: ScenarioResult, before?: ScenarioResult): string {
   if (!before || before.coldRatio === undefined || current.coldRatio === undefined) {
     return "n/a";
@@ -516,17 +567,20 @@ function report(
     );
   }
 
-  const unprocessed = results.filter(
-    (r) => r.passedThroughUnprocessed && r.contentType !== "image/gif"
-  );
+  // Relaying an animated gif or an untransformable type untouched is correct,
+  // not a defect. Counting them made the number read as a bug count with a
+  // permanent floor of one. What is worth flagging is a type the proxy CAN
+  // transform coming back byte-identical.
+  const counters = deriveCounters(results);
+  const unprocessed = counters.unprocessed;
   if (unprocessed.length > 0) {
-    console.log(`\nreturned unprocessed (no resize, no recompression):`);
+    console.log(`\ntransformable but returned unprocessed:`);
     for (const r of unprocessed) {
       console.log(`  ${r.name.padEnd(22)} ${r.note ?? ""}`);
     }
   }
 
-  const uncached = results.filter((r) => r.originFetchesPerRequest > 0.5);
+  const uncached = counters.refetched;
   if (uncached.length > 0) {
     console.log(`\nrefetched from origin on every request:`);
     for (const r of uncached) {
@@ -534,7 +588,7 @@ function report(
     }
   }
 
-  const noCacheControl = results.filter((r) => !r.cacheControlOnHit);
+  const noCacheControl = counters.noCacheControl;
   if (noCacheControl.length > 0) {
     console.log(
       `\nno Cache-Control on cache hit (BUG-15): ${noCacheControl.length}/${results.length} scenarios`
@@ -554,10 +608,7 @@ function report(
   console.log("  wall time barely moves because the work runs across cores; cpu is the cost");
 
   console.log(
-    `\ncache under pressure: ${pressure.distinctKeys} distinct keys, ` +
-      `${(pressure.unboundedBytes / 1024).toFixed(0)} kB requested, ` +
-      `${(pressure.retainedBytes / 1024).toFixed(0)} kB retained ` +
-      `against a ${(pressure.budgetBytes / 1024).toFixed(0)} kB budget ` +
+    `\ncache under pressure: ${describePressure(pressure)} ` +
       `(${pressure.entries} entries kept, within budget: ${pressure.withinBudget})`
   );
   if (!pressure.exercisedEviction) {
@@ -634,21 +685,18 @@ function writeSummary(
     lines.push(`| ${row.join(" | ")} |`);
   }
 
-  const unprocessed = results.filter(
-    (r) => r.passedThroughUnprocessed && r.contentType !== "image/gif"
-  );
+  const counters = deriveCounters(results);
   lines.push("");
   lines.push(
-    `- returned unprocessed: **${unprocessed.length}** (${unprocessed.map((r) => r.name).join(", ") || "none"})`
+    `- transformable but returned unprocessed: **${counters.unprocessed.length}**` +
+      (counters.unprocessed.length
+        ? ` (${counters.unprocessed.map((r) => r.name).join(", ")})`
+        : "")
   );
+  lines.push(`- no Cache-Control on hit: **${counters.noCacheControl.length}/${counters.total}**`);
+  lines.push(`- refetched from origin every request: **${counters.refetched.length}**`);
   lines.push(
-    `- no Cache-Control on hit: **${results.filter((r) => !r.cacheControlOnHit).length}/${results.length}**`
-  );
-  lines.push(
-    `- cache under pressure: **${(pressure.retainedBytes / 1024 / 1024).toFixed(1)} MB** retained ` +
-      `from ${(pressure.unboundedBytes / 1024 / 1024).toFixed(1)} MB requested across ` +
-      `${pressure.distinctKeys} distinct keys, against a ` +
-      `${(pressure.budgetBytes / 1024).toFixed(0)} kB budget` +
+    `- cache under pressure: ${describePressure(pressure)}` +
       (pressure.exercisedEviction ? "" : " — **budget never reached, eviction not exercised**")
   );
   lines.push(
