@@ -64,65 +64,206 @@ export function makeWebp(options: MakeImageOptions = {}): Promise<Buffer> {
     .toBuffer();
 }
 
-/**
- * Hand-built GIF bytes. `isAnimatedGif` parses the container directly, so
- * constructing the container by hand is the only way to control exactly the
- * bytes it reads (global colour table presence, delay time, extension bytes).
- */
-export interface MakeGifOptions {
-  /** Delay time in 1/100s, stored little-endian per the GIF spec. 0 = static. */
-  delay?: number;
-  /** Whether to emit a Global Color Table. */
-  globalColorTable?: boolean;
-  /** N in the packed field; table size is 3 * 2^(N+1) bytes. */
-  colorTableSizeExponent?: number;
-  /** Emit the Graphics Control Extension block at all. */
-  graphicsControlExtension?: boolean;
+export interface MakeAnimatedOptions extends MakeImageOptions {
+  /** Number of frames. Must be at least 2 for the result to be animated. */
+  frames?: number;
+  /** Per-frame delay in milliseconds. */
+  delayMs?: number;
 }
 
-export function makeGif(options: MakeGifOptions = {}): Buffer {
-  const {
-    delay = 0,
-    globalColorTable = true,
-    colorTableSizeExponent = 1,
-    graphicsControlExtension = true,
-  } = options;
+/**
+ * A filmstrip: every frame stacked vertically in one raw image, with
+ * `raw.pageHeight` telling libvips where each one ends. This is how sharp
+ * represents an animation — one image of `width x (pageHeight * pages)`.
+ */
+function animatedStrip({ width = 32, height = 32, frames = 5 }: MakeAnimatedOptions) {
+  const channels = 3;
+  const data = Buffer.alloc(width * height * frames * channels);
+
+  for (let frame = 0; frame < frames; frame++) {
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const i = ((frame * height + y) * width + x) * channels;
+        // the frame index drives red, so no two frames are byte-identical and
+        // an encoder cannot collapse them into one
+        data[i] = (frame * 47) % 256;
+        data[i + 1] = Math.floor((x / width) * 255);
+        data[i + 2] = Math.floor((y / height) * 255);
+      }
+    }
+  }
+
+  return sharp(data, { raw: { width, height: height * frames, channels: 3, pageHeight: height } });
+}
+
+/** A real multi-frame WebP, written by libwebp via sharp. */
+export function makeAnimatedWebp(options: MakeAnimatedOptions = {}): Promise<Buffer> {
+  return animatedStrip(options)
+    .webp({ quality: options.quality ?? 80, delay: options.delayMs ?? 100, loop: 0 })
+    .toBuffer();
+}
+
+/** A real multi-frame GIF, written by cgif via sharp. */
+export function makeSharpAnimatedGif(options: MakeAnimatedOptions = {}): Promise<Buffer> {
+  return animatedStrip(options)
+    .gif({ delay: options.delayMs ?? 100, loop: 0 })
+    .toBuffer();
+}
+
+/**
+ * Packs codes LSB-first, which is the bit order GIF's LZW stream uses
+ * (GIF89a spec, Appendix F).
+ */
+class BitWriter {
+  private readonly bytes: number[] = [];
+  private current = 0;
+  private bitsUsed = 0;
+
+  write(code: number, codeWidth: number): void {
+    for (let bit = 0; bit < codeWidth; bit++) {
+      if (code & (1 << bit)) {
+        this.current |= 1 << this.bitsUsed;
+      }
+
+      if (++this.bitsUsed === 8) {
+        this.bytes.push(this.current);
+        this.current = 0;
+        this.bitsUsed = 0;
+      }
+    }
+  }
+
+  finish(): Buffer {
+    if (this.bitsUsed > 0) {
+      this.bytes.push(this.current);
+    }
+
+    return Buffer.from(this.bytes);
+  }
+}
+
+/**
+ * A valid but deliberately naive LZW stream: a Clear Code before every literal,
+ * so the decoder's table never grows and the code width never changes.
+ *
+ * Real encoders compress. This one only has to produce bytes any GIF decoder
+ * accepts, and staying at a fixed code width removes the only part of LZW that
+ * is easy to get subtly wrong.
+ */
+function gifLzwLiterals(indices: number[], minCodeSize: number): Buffer {
+  const clearCode = 1 << minCodeSize;
+  const endOfInformation = clearCode + 1;
+  const codeWidth = minCodeSize + 1;
+
+  const writer = new BitWriter();
+  for (const index of indices) {
+    writer.write(clearCode, codeWidth);
+    writer.write(index, codeWidth);
+  }
+  writer.write(clearCode, codeWidth);
+  writer.write(endOfInformation, codeWidth);
+
+  // Image data travels in sub-blocks of at most 255 bytes, each prefixed with
+  // its length and the run terminated by a zero-length block.
+  const stream = writer.finish();
+  const blocks: Buffer[] = [Buffer.from([minCodeSize])];
+  for (let offset = 0; offset < stream.length; offset += 255) {
+    const chunk = stream.subarray(offset, offset + 255);
+    blocks.push(Buffer.from([chunk.length]), chunk);
+  }
+  blocks.push(Buffer.from([0x00]));
+
+  return Buffer.concat(blocks);
+}
+
+export interface MakeLoopingGifOptions {
+  /** Number of frames written. */
+  frames?: number;
+  /** Square edge length in pixels. */
+  size?: number;
+  /** Delay per frame in 1/100s, little-endian per the spec. */
+  delay?: number;
+  /** NETSCAPE loop count; 0 means forever. */
+  loop?: number;
+}
+
+/**
+ * A genuine looping animated GIF, encoded here rather than by sharp.
+ *
+ * This exists because every other GIF in the suite comes from libvips/cgif —
+ * the same library the code under test asks about animation — so an agreement
+ * between them proves nothing about a GIF from anywhere else. The block layout
+ * is the one the GIF89a spec prescribes and that GIMP, ImageMagick and
+ * `gifsicle` all emit: a NETSCAPE 2.0 Application Extension announcing the loop
+ * immediately after the Global Colour Table, and only then the first Graphics
+ * Control Extension.
+ *
+ * That ordering is the whole bug. A probe that expects `0x21 0xF9` right after
+ * the colour table finds `0x21 0xFF` — the Application Extension — and reports
+ * a 30-frame animation as a still image.
+ */
+export function makeLoopingGif(options: MakeLoopingGifOptions = {}): Buffer {
+  const { frames = 3, size = 4, delay = 10, loop = 0 } = options;
+
+  // 4 colours, so N = 1 in the packed field and the table is 3 * 2^2 bytes.
+  const colorTableSizeExponent = 1;
+  const minCodeSize = 2;
 
   const parts: Buffer[] = [];
 
-  // Header (6 bytes)
   parts.push(Buffer.from("GIF89a", "ascii"));
 
-  // Logical Screen Descriptor (7 bytes)
   const lsd = Buffer.alloc(7);
-  lsd.writeUInt16LE(4, 0); // width
-  lsd.writeUInt16LE(4, 2); // height
-  lsd.writeUInt8(globalColorTable ? 0x80 | colorTableSizeExponent : 0x00, 4); // packed
+  lsd.writeUInt16LE(size, 0); // logical screen width
+  lsd.writeUInt16LE(size, 2); // logical screen height
+  lsd.writeUInt8(0x80 | colorTableSizeExponent, 4); // global colour table present
   lsd.writeUInt8(0, 5); // background colour index
   lsd.writeUInt8(0, 6); // pixel aspect ratio
   parts.push(lsd);
 
-  // Global Color Table: 3 * 2^(N+1) bytes
-  if (globalColorTable) {
-    parts.push(Buffer.alloc(3 * 2 ** (colorTableSizeExponent + 1)));
-  }
+  // Global Colour Table: black, red, green, blue.
+  parts.push(Buffer.from([0, 0, 0, 255, 0, 0, 0, 255, 0, 0, 0, 255]));
 
-  // Graphics Control Extension (8 bytes)
-  if (graphicsControlExtension) {
+  // NETSCAPE 2.0 Application Extension — the looping signal, and the block that
+  // sits where a fixed-offset probe expects the first Graphics Control
+  // Extension.
+  const netscape = Buffer.alloc(19);
+  netscape.writeUInt8(0x21, 0); // extension introducer
+  netscape.writeUInt8(0xff, 1); // application extension label
+  netscape.writeUInt8(0x0b, 2); // block size: 11 bytes of identifier
+  netscape.write("NETSCAPE2.0", 3, "ascii");
+  netscape.writeUInt8(0x03, 14); // sub-block size
+  netscape.writeUInt8(0x01, 15); // sub-block id: loop count follows
+  netscape.writeUInt16LE(loop, 16);
+  netscape.writeUInt8(0x00, 18); // block terminator
+  parts.push(netscape);
+
+  for (let frame = 0; frame < frames; frame++) {
     const gce = Buffer.alloc(8);
     gce.writeUInt8(0x21, 0); // extension introducer
     gce.writeUInt8(0xf9, 1); // graphics control label
     gce.writeUInt8(0x04, 2); // block size
     gce.writeUInt8(0x00, 3); // packed
     gce.writeUInt16LE(delay, 4); // delay time, little-endian per spec
-    gce.writeUInt8(0, 6); // transparent colour index
-    gce.writeUInt8(0, 7); // block terminator
+    gce.writeUInt8(0x00, 6); // transparent colour index
+    gce.writeUInt8(0x00, 7); // block terminator
     parts.push(gce);
+
+    const imageDescriptor = Buffer.alloc(10);
+    imageDescriptor.writeUInt8(0x2c, 0); // image separator
+    imageDescriptor.writeUInt16LE(0, 1); // left
+    imageDescriptor.writeUInt16LE(0, 3); // top
+    imageDescriptor.writeUInt16LE(size, 5); // width
+    imageDescriptor.writeUInt16LE(size, 7); // height
+    imageDescriptor.writeUInt8(0x00, 9); // no local colour table, not interlaced
+    parts.push(imageDescriptor);
+
+    // Rotate the palette per frame so no two frames are identical.
+    const pixels = Array.from({ length: size * size }, (_, i) => (i + frame) % 4);
+    parts.push(gifLzwLiterals(pixels, minCodeSize));
   }
 
-  // Trailer + padding so DataView reads never run off the end
-  parts.push(Buffer.alloc(32));
-  parts.push(Buffer.from([0x3b]));
+  parts.push(Buffer.from([0x3b])); // trailer
 
   return Buffer.concat(parts);
 }

@@ -351,9 +351,9 @@ number. Read `Δ served` first.
 
 ## Micro-benchmark findings
 
-**BUG-20 is not a footgun, it is the dominant cost of that function.**
-`isAnimatedGif` copies the entire payload one byte at a time in JS to read about
-eight bytes near the front.
+**BUG-20 was not a footgun, it was the dominant cost of that function.**
+_Historical — `isAnimatedGif` no longer exists (see below)._ It copied the entire
+payload one byte at a time in JS to read about eight bytes near the front.
 
 | payload | current      | reads in place | ratio      |
 | ------- | ------------ | -------------- | ---------- |
@@ -361,9 +361,33 @@ eight bytes near the front.
 | 64 kB   | 18,384 hz    | 18,081,866 hz  | 984x       |
 | 512 kB  | 2,399 hz     | 21,883,418 hz  | **7,568x** |
 
-The cost scales linearly with payload, so it grows with exactly the images the
-proxy exists to handle. The reference implementation is in the bench file and is
-not a proposed fix; it exists to put a number on the waste.
+The cost scaled linearly with payload, so it grew with exactly the images the
+proxy exists to handle.
+
+**Animation detection costs about 0.1 ms, flat in payload size.** #52 replaced
+the byte parser with `metadata().pages`, which runs on every transformable
+request rather than only on GIFs. `src/is-animated.bench.ts` measures what that
+buys back, on darwin-arm64 / sharp 0.35.3:
+
+| payload                           | `isAnimated` |
+| --------------------------------- | ------------ |
+| still jpeg 64x64 (1 kB)           | 8,982 hz     |
+| still jpeg 1600x1200 (2617 kB)    | 8,212 hz     |
+| animated gif 32x32 x3 (5 kB)      | 11,337 hz    |
+| animated gif 320x240 x30 (995 kB) | 9,218 hz     |
+
+Flat across a 2,600x range in payload is the point: `metadata()` reads the header
+and does not decode. If this ever starts tracking payload size, something is
+decoding that should not be.
+
+**The proxy benchmark cannot resolve that cost, and did not try to.** On a
+10–24 ms transform, 0.1 ms is under 1%, while `TIMING_TOLERANCE` is 25% and was
+set from measured run-to-run noise rather than chosen. Every scenario reported
+`=` on `Δ cold*` across the change, which means "inside that band", not
+"unchanged": the retaken baseline moved between -14% and +11% against the old
+one, in both directions, on a calibration that itself drifted 1.4%. Read those
+as noise. The claim this benchmark supports is that no scenario left the
+tolerance, and nothing stronger.
 
 **URL generation is not a bottleneck.** A full 19-candidate srcset costs about
 13 µs across all three providers, and single calls run at 1.5-1.9 M/sec. If page

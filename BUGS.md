@@ -110,6 +110,35 @@ such.
 > flipped. Endianness is not observable through a boolean (a delay is non-zero
 > either way round), so `gifDelayTime` is now exported and asserted directly.
 
+> **Superseded** — see [#52](https://github.com/veksen/micro-image/issues/52).
+> Fixing the false positive left the false negative behind: the same probe
+> reported **every looping GIF** as a still image, because it required
+> `0x21 0xF9` at `6 + 7 + globalColorTableSize` and that is exactly where a
+> looping GIF puts its NETSCAPE 2.0 Application Extension (`0x21 0xFF`). The
+> first real Graphics Control Extension sits 19 bytes later. Measured end to end
+> at `?width=400`: 30 frames in, 1 frame out. Animated WebP was worse — the guard
+> read `upstreamContentType === gifMime`, so WebP never reached it at all.
+>
+> The suite could not see either one. Its only animated fixture was a hand-built
+> container with no Application Extension, so the probe looked correct against
+> the only GIF it was ever asked about.
+>
+> `is-animated-gif.ts` is gone. `is-animated.ts` asks the decoder instead:
+> `metadata().pages`, populated on a default load, no full decode, and it covers
+> GIF, WebP and TIFF alike. There is no offset left to read and therefore no
+> byte order left to get wrong, so **BUG-18b has no direct successor**. What
+> carried over is its reason for existing — a boolean cannot distinguish a
+> correct count from a wrong one — so `frameCount` is exported and asserted
+> against fixtures whose frame count is known by construction. The BUG-18
+> quality sweep carried over unchanged; a new test plants the exact byte pair the
+> retired probe looked for, at the exact offset, and asserts the JPEG is still
+> not animated.
+>
+> `test-helpers.ts` grew `makeLoopingGif`, a GIF encoded here rather than by
+> sharp — LZW, NETSCAPE extension and all. Every other GIF in the suite comes
+> from libvips, which is the library being asked about animation, so their
+> agreeing proved nothing about a GIF from anywhere else.
+
 ## Bugs found while writing the tests
 
 Five defects not in the original report, numbered from 28 to avoid collision.
@@ -162,7 +191,7 @@ Five defects not in the original report, numbered from 28 to avoid collision.
 | 15  | `Cache-Control` missing on every cache hit                          | `server.test.ts`                                            | **fixed** ([#10](https://github.com/veksen/micro-image/issues/10)) |
 | 16  | unbounded in-memory cache                                           | `cache.test.ts`                                             | **fixed** ([#6](https://github.com/veksen/micro-image/issues/6))   |
 | 17  | cache key omits quality / format / blur radius (see correction)     | `server.test.ts`, `cache.test.ts`                           | **fixed** ([#8](https://github.com/veksen/micro-image/issues/8))   |
-| 18  | `isAnimatedGif` runs unguarded on every mime (see correction)       | `is-animated-gif.test.ts`, `server.test.ts`                 | **fixed** ([#4](https://github.com/veksen/micro-image/issues/4))   |
+| 18  | `isAnimatedGif` runs unguarded on every mime (see correction)       | `is-animated.test.ts`, `server.test.ts`                     | **fixed** ([#4](https://github.com/veksen/micro-image/issues/4))   |
 | 19  | `Buffer.from(data, "binary")` double-buffers                        | `server.test.ts` (fidelity only)                            | **fixed** ([#15](https://github.com/veksen/micro-image/issues/15)) |
 | 20  | `isAnimatedGif` copies the buffer byte-by-byte in JS                | —                                                           | **fixed** incidentally with 18                                     |
 | 21  | unsupported content types are never cached                          | `server.test.ts`                                            | **fixed** ([#10](https://github.com/veksen/micro-image/issues/10)) |
@@ -177,6 +206,8 @@ Five defects not in the original report, numbered from 28 to avoid collision.
 | 30  | imgproxy standard base64 instead of base64url                       | `providers/imgproxy.test.ts`                                | **fixed** ([#11](https://github.com/veksen/micro-image/issues/11)) |
 | 31  | imgproxy missing signature / `insecure` segment                     | `providers/imgproxy.test.ts`                                | **fixed** ([#11](https://github.com/veksen/micro-image/issues/11)) |
 | 32  | imgproxy source not escaped outside printable ASCII                 | `providers/imgproxy.test.ts`                                | **fixed** ([#11](https://github.com/veksen/micro-image/issues/11)) |
+| 33  | every looping gif is flattened to one frame (see correction)        | `is-animated.test.ts`, `server.test.ts`                     | **fixed** ([#52](https://github.com/veksen/micro-image/issues/52)) |
+| 34  | animated webp has no guard at all, so it is flattened too           | `is-animated.test.ts`, `server.test.ts`                     | **fixed** ([#52](https://github.com/veksen/micro-image/issues/52)) |
 
 ### Deliberately untested
 
@@ -184,14 +215,16 @@ Five defects not in the original report, numbered from 28 to avoid collision.
   nothing. It is a lint-level cleanup.
 - **BUG-19** and **BUG-20** are wasted work, not wrong answers. `server.test.ts`
   proves the bytes are not corrupted; the cost is a benchmark measurement, not
-  an assertion.
+  an assertion. The benchmark that measured BUG-20 is gone with the function it
+  measured — see `BENCHMARK.md` § Micro-benchmark findings, where the figures are
+  kept as history and `is-animated.bench.ts` measures the replacement.
 
 ## Layout
 
 Tests sit next to the code they cover, as `*.test.ts` / `*.test.tsx`.
 
 ```
-apps/cache/src/            cache.test.ts, is-animated-gif.test.ts, server.test.ts
+apps/cache/src/            cache.test.ts, is-animated.test.ts, server.test.ts
                            test-helpers.ts      fixture images + a real local origin
 apps/docs/src/             image-utils.test.ts, components/compare.component.test.tsx
                            __tests__/api-meta.test.ts
@@ -207,8 +240,16 @@ ship as `/api/meta.test`.
 
 No binary fixtures are committed. `apps/cache/src/test-helpers.ts` generates
 images with sharp at runtime, so fixtures can never drift from the installed
-sharp version, and hand-builds GIF containers byte by byte — the only way to
-control exactly what `isAnimatedGif` parses.
+sharp version.
+
+It also hand-builds one, and that is deliberate. `makeLoopingGif` encodes a real
+animated GIF here — LZW stream, NETSCAPE 2.0 Application Extension, one Graphics
+Control Extension per frame. Every other GIF in the suite comes out of libvips,
+which is the same library the animation probe asks about animation, so the two
+agreeing proves nothing about a GIF written by anything else. That blind spot is
+[#52](https://github.com/veksen/micro-image/issues/52): the suite's only animated
+fixture happened to have no Application Extension, and the probe looked correct
+against it while flattening every real looping GIF it was given.
 
 Proxy tests run against a **real local HTTP origin** rather than a mocked axios,
 so the actual network path (agents, headers, arraybuffer decoding) stays under

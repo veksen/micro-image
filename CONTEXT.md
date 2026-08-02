@@ -120,13 +120,20 @@ one. **Never delete an `it.fails` ledger test to make CI pass.**
 
 One deserves calling out here because vision milestone 2 walks straight into it:
 
-**BUG-18 — `isAnimatedGif` misfires on ordinary JPEGs.** The guard reads byte 10, where it
-expects the GIF logical screen descriptor; in a JPEG that byte is the first quantization-table
-entry, whose value is set by encoder quality. It compares with bitwise AND rather than
-equality, so it passes on any byte pair sharing a single bit. On one fixed image, qualities
-60, 90 and 100 are all detected as animated GIFs. The route then returns the original bytes
-uncompressed and unresized — and caches them under a key claiming the requested width. That
-is a correctness bug and a cache-poisoning bug at once.
+**Animation detection, and why it is not a byte parser any more.** The proxy used to decide
+whether an image animated by reading fixed offsets out of the GIF container, and it got the
+answer wrong in both directions. BUG-18 was the false positive: byte 10 of a JPEG is a
+quantization-table entry whose value is set by encoder quality, the guard compared with
+bitwise AND rather than equality, and on one fixed image qualities 60, 90 and 100 all came
+back as animated GIFs — so the route returned the original bytes uncompressed and unresized,
+and cached them under a key claiming the requested width. #52 was the false negative left
+behind by that fix: every looping GIF puts a NETSCAPE 2.0 Application Extension at exactly the
+offset the guard expected a Graphics Control Extension, so 30 frames went in and 1 came out,
+and animated WebP was never checked at all.
+
+`apps/cache/src/is-animated.ts` now asks libvips — `metadata().pages`, a header read on a
+default load — and the route passes any multi-frame image through untouched. Read it before
+adding a format: mime cannot express animation, and only the container can.
 
 ## Roadmap
 
