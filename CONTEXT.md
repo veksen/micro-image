@@ -138,6 +138,15 @@ and animated WebP was never checked at all.
 default load — and the route passes any multi-frame image through untouched. Read it before
 adding a format: mime cannot express animation, and only the container can.
 
+APNG is the one format that cannot be answered that way, and #53 is why the module has a
+second path. libvips has no APNG code in either direction, so it reports no page count at all
+for a 12-frame file rather than reporting the wrong one. An APNG is a PNG, arrives as
+`image/png`, and passed straight into the transform: 12 frames in, 1 out, 97.9% of the bytes
+gone with no error. So for PNG alone the container is read directly, walking chunks by their
+length prefix for an `acTL` before the first `IDAT` (PNG 3rd ed §11.3.6.1). Passing an APNG
+through unchanged is the end state, not a stopgap — there is no encoder to resize it with.
+ADR `0010-unimprovable-formats` records that.
+
 ## Roadmap
 
 From `VISION.md`. Each step is independently useful and does not strictly require the next.

@@ -1,12 +1,16 @@
 import { describe, it, expect } from "vitest";
 import { frameCount, isAnimated } from "./is-animated";
 import {
+  insertPngChunkBeforeIdat,
+  makeApng,
   makeJpeg,
   makeLoopingGif,
   makeAnimatedWebp,
   makePng,
   makeSharpAnimatedGif,
   makeWebp,
+  pngChunk,
+  pngChunkTypes,
 } from "./test-helpers";
 
 describe("frameCount", () => {
@@ -103,6 +107,104 @@ describe("looping gifs — the NETSCAPE application extension [#52]", () => {
   it("does not treat a single-frame looping gif as animated", async () => {
     expect(await frameCount(makeLoopingGif({ frames: 1 }))).toBe(1);
     expect(await isAnimated(makeLoopingGif({ frames: 1 }))).toBe(false);
+  });
+});
+
+/**
+ * APNG is the one animated format libvips cannot see (#53).
+ *
+ * Every other container answers `metadata().pages`. PNG does not: libvips has no
+ * APNG code in either direction, so it reports no page count at all rather than
+ * reporting the wrong one. Asking the decoder — the principle this module is
+ * built on — returns 1 for a 12-frame file, and the transform then throws 11
+ * frames away without an error or a warning event.
+ *
+ * So this is the one case that must read the container. `acTL` before the first
+ * `IDAT` is the signal, per PNG Third Edition §11.3.6.1.
+ */
+describe("apng — the format libvips cannot page [#53]", () => {
+  it("counts the frames an acTL declares", async () => {
+    expect(await frameCount(makeApng({ frames: 12 }))).toBe(12);
+    expect(await frameCount(makeApng({ frames: 2 }))).toBe(2);
+  });
+
+  it("detects an apng as animated", async () => {
+    expect(await isAnimated(makeApng({ frames: 12 }))).toBe(true);
+  });
+
+  it("does not treat a still png from the same builder as animated", async () => {
+    // identical construction, chunk layout and pixel data — only the acTL differs
+    const still = makeApng({ frames: 12, animationControl: false });
+
+    expect(await frameCount(still)).toBe(1);
+    expect(await isAnimated(still)).toBe(false);
+  });
+
+  it("does not treat a single-frame apng as animated", async () => {
+    expect(await frameCount(makeApng({ frames: 1 }))).toBe(1);
+    expect(await isAnimated(makeApng({ frames: 1 }))).toBe(false);
+  });
+
+  it("reads the count from the container, not from sharp", async () => {
+    const apng = makeApng({ frames: 12 });
+    const sharp = (await import("sharp")).default;
+
+    // the gap this closes: sharp decodes the file happily and still says nothing
+    // about the other 11 frames
+    const metadata = await sharp(apng).metadata();
+    expect(metadata.format).toBe("png");
+    expect(metadata.pages).toBeUndefined();
+
+    expect(await frameCount(apng)).toBe(12);
+  });
+
+  it("ignores a well-formed acTL that arrives after the first IDAT", async () => {
+    // §11.3.6.1: "The acTL chunk must appear before the first IDAT chunk within
+    // a valid PNG stream." A late one animates nothing, and honouring it would
+    // pass through files that should have been transformed.
+    const still = makeApng({ frames: 12, animationControl: false });
+    const actl = Buffer.alloc(8);
+    actl.writeUInt32BE(12, 0); // num_frames
+    actl.writeUInt32BE(0, 4); // num_plays
+
+    // between the last IDAT and IEND, so the walk would reach it if it kept going
+    const iendStart = still.length - 12;
+    const late = Buffer.concat([
+      still.subarray(0, iendStart),
+      pngChunk("acTL", actl),
+      still.subarray(iendStart),
+    ]);
+
+    expect(pngChunkTypes(late)).toEqual(["IHDR", "IDAT", "acTL", "IEND"]);
+    expect(await isAnimated(late)).toBe(false);
+  });
+
+  it("is not fooled by the acTL bytes sitting inside another chunk's data", async () => {
+    // The four bytes are only a chunk type when a length prefix puts them there.
+    // This plants them before the first IDAT, inside a valid tEXt chunk, which
+    // is exactly where a scan-for-bytes probe would find them and be wrong.
+    const still = makeApng({ frames: 12, animationControl: false });
+    const decoy = pngChunk("tEXt", Buffer.from("Comment\0acTL twelve frames", "ascii"));
+    const planted = insertPngChunkBeforeIdat(still, decoy);
+
+    const bytesAt = planted.indexOf(Buffer.from("acTL", "ascii"));
+    const idatAt = planted.indexOf(Buffer.from("IDAT", "ascii"));
+    expect(bytesAt).toBeGreaterThan(0);
+    expect(bytesAt).toBeLessThan(idatAt);
+    expect(pngChunkTypes(planted)).toEqual(["IHDR", "tEXt", "IDAT", "IEND"]);
+
+    expect(await isAnimated(planted)).toBe(false);
+  });
+
+  it("refuses to read a frame count out of a truncated acTL", async () => {
+    // A zero-length acTL would otherwise hand back whatever four bytes follow —
+    // its own CRC, or the next chunk's length prefix — as a frame count.
+    const still = makeApng({ frames: 12, animationControl: false });
+    const empty = insertPngChunkBeforeIdat(still, pngChunk("acTL", Buffer.alloc(0)));
+
+    expect(pngChunkTypes(empty)).toEqual(["IHDR", "acTL", "IDAT", "IEND"]);
+    expect(await frameCount(empty)).toBe(1);
+    expect(await isAnimated(empty)).toBe(false);
   });
 });
 

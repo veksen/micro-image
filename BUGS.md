@@ -225,6 +225,7 @@ gated on [ADR 0011](docs/adr/0011-provider-selection.md), which is still `propos
 | 33  | every looping gif is flattened to one frame (see correction)        | `is-animated.test.ts`, `server.test.ts`                     | **fixed** ([#52](https://github.com/veksen/micro-image/issues/52)) |
 | 34  | animated webp has no guard at all, so it is flattened too           | `is-animated.test.ts`, `server.test.ts`                     | **fixed** ([#52](https://github.com/veksen/micro-image/issues/52)) |
 | 35  | every consumer ships every provider                                 | `tree-shaking.test.ts`                                      | yes                                                                |
+| 36  | apng is flattened to one frame, 97.9% of the bytes discarded        | `is-animated.test.ts`, `server.test.ts`                     | **fixed** ([#53](https://github.com/veksen/micro-image/issues/53)) |
 
 ### Deliberately untested
 
