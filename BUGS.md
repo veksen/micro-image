@@ -172,8 +172,8 @@ Five defects not in the original report, numbered from 28 to avoid collision.
 | 25  | SSRF — `?image=` accepts any URL                                    | `server.test.ts`                                            | yes                                                                |
 | 26  | sharp errors bubble up as unhandled 500s                            | `server.test.ts`                                            | **fixed** ([#7](https://github.com/veksen/micro-image/issues/7))   |
 | 27  | quality / format / blur advertised but silently dropped             | covered by 2, 3, 4                                          | **fixed** ([#9](https://github.com/veksen/micro-image/issues/9))   |
-| 28  | ipx bogus `image_` modifier                                         | `providers/ipx.test.ts`                                     | yes                                                                |
-| 29  | ipx unencoded source URL                                            | `providers/ipx.test.ts`                                     | yes                                                                |
+| 28  | ipx bogus `image_` modifier                                         | `providers/ipx.test.ts`                                     | **fixed** ([#12](https://github.com/veksen/micro-image/issues/12)) |
+| 29  | ipx unencoded source URL                                            | `providers/ipx.test.ts`                                     | **fixed** ([#12](https://github.com/veksen/micro-image/issues/12)) |
 | 30  | imgproxy standard base64 instead of base64url                       | `providers/imgproxy.test.ts`                                | **fixed** ([#11](https://github.com/veksen/micro-image/issues/11)) |
 | 31  | imgproxy missing signature / `insecure` segment                     | `providers/imgproxy.test.ts`                                | **fixed** ([#11](https://github.com/veksen/micro-image/issues/11)) |
 | 32  | imgproxy source not escaped outside printable ASCII                 | `providers/imgproxy.test.ts`                                | **fixed** ([#11](https://github.com/veksen/micro-image/issues/11)) |
