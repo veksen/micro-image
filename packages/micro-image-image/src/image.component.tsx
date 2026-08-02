@@ -94,8 +94,6 @@ function Image<GeneratorOptions extends IProviderOptions = IProviderOptions>(
 
   useEffect(() => {
     if (!imageRef.current) return;
-
-    if (!imageRef.current) return;
     if (typeof window === "undefined") return;
 
     observerRef.current = new ResizeObserver(([entry]: ResizeObserverEntry[]) => {

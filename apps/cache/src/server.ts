@@ -219,7 +219,12 @@ export function getSmallestImage(image1: Buffer, image2: Buffer): Buffer {
 }
 
 export async function downloadImage(url: string) {
-  return axios(url, {
+  // responseType "arraybuffer" resolves to a Buffer under Node's adapter, but
+  // axios types `data` as `any` without this. Stating it here is what lets the
+  // route use the body directly: the previous Buffer.from(data, "binary") was
+  // a full copy of every payload, and "binary" is latin1, which would have
+  // corrupted the bytes had the input ever actually been a string.
+  return axios<Buffer>(url, {
     responseType: "arraybuffer",
     httpAgent,
     httpsAgent,
@@ -298,12 +303,12 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
       // origin on every request is the same upstream load the cache exists to
       // remove.
       if (!isSupported(upstreamContentType)) {
-        const body = image.data as Buffer;
+        const body = image.data;
         toCache(id, { contentType: upstreamContentType, buffer: body });
         return { contentType: upstreamContentType, body };
       }
 
-      const imageBuffer = Buffer.from(image.data, "binary");
+      const imageBuffer = image.data;
 
       // animated gif, return as is. The mime guard matters: the animation probe
       // reads fixed offsets that carry unrelated data in other formats, so

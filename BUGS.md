@@ -131,7 +131,7 @@ Four defects not in the original report, numbered from 28 to avoid collision.
 | 4   | `format` accepted by the client, ignored by the proxy               | `server.test.ts`                                            | **fixed** ([#9](https://github.com/veksen/micro-image/issues/9))   |
 | 5   | `generateUrl` always emits `blur=false`                             | `providers/micro-image.test.ts`                             | **fixed** ([#9](https://github.com/veksen/micro-image/issues/9))   |
 | 6   | imgproxy single-element option arrays are correct by accident       | `providers/imgproxy.test.ts`                                | yes                                                                |
-| 7   | duplicate `if (!imageRef.current) return;`                          | —                                                           | no (see below)                                                     |
+| 7   | duplicate `if (!imageRef.current) return;`                          | —                                                           | **fixed** ([#15](https://github.com/veksen/micro-image/issues/15)) |
 | 8   | `useImage` cleanup calls `removeEventListener` on property handlers | `use-image.hook.test.tsx`                                   | yes                                                                |
 | 9   | `loaded` / `fetching` returned but never gate rendering             | `image.component.test.tsx`                                  | yes                                                                |
 | 10  | first paint ships no `srcset` / `sizes` for the preload scanner     | `image.component.test.tsx`                                  | yes                                                                |
@@ -143,7 +143,7 @@ Four defects not in the original report, numbered from 28 to avoid collision.
 | 16  | unbounded in-memory cache                                           | `cache.test.ts`                                             | **fixed** ([#6](https://github.com/veksen/micro-image/issues/6))   |
 | 17  | cache key omits quality / format / blur radius (see correction)     | `server.test.ts`, `cache.test.ts`                           | **fixed** ([#8](https://github.com/veksen/micro-image/issues/8))   |
 | 18  | `isAnimatedGif` runs unguarded on every mime (see correction)       | `is-animated-gif.test.ts`, `server.test.ts`                 | **fixed** ([#4](https://github.com/veksen/micro-image/issues/4))   |
-| 19  | `Buffer.from(data, "binary")` double-buffers                        | `server.test.ts` (fidelity only)                            | no — cost is perf, belongs in the benchmark                        |
+| 19  | `Buffer.from(data, "binary")` double-buffers                        | `server.test.ts` (fidelity only)                            | **fixed** ([#15](https://github.com/veksen/micro-image/issues/15)) |
 | 20  | `isAnimatedGif` copies the buffer byte-by-byte in JS                | —                                                           | **fixed** incidentally with 18                                     |
 | 21  | unsupported content types are never cached                          | `server.test.ts`                                            | **fixed** ([#10](https://github.com/veksen/micro-image/issues/10)) |
 | 22  | upstream `content-type` echoed with no validation                   | `server.test.ts`                                            | **fixed** ([#10](https://github.com/veksen/micro-image/issues/10)) |
