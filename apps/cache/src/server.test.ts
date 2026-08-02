@@ -304,34 +304,49 @@ describe("GET /cache — animated-gif handling, end to end [BUG-18]", () => {
 const UNDECODABLE = Buffer.alloc(64);
 
 describe("GET /cache — error handling [BUG-26]", () => {
-  it("returns a 500 when sharp cannot decode the payload", async () => {
+  it("falls back to the original bytes when sharp cannot decode the payload", async () => {
     origin = await startOrigin({
       "/broken.png": { body: UNDECODABLE, contentType: "image/png" },
     });
 
     const res = await get({ image: `${origin.url}/broken.png`, width: "100" });
 
-    // no try/catch and no fallback to the original bytes
-    expect(res.statusCode).toBe(500);
+    expect(res.statusCode).toBe(200);
+    expect(Buffer.compare(res.rawPayload, UNDECODABLE)).toBe(0);
+    expect(res.headers["content-type"]).toContain("image/png");
   });
 
-  it("no longer masks undecodable ascii payloads as animated gifs [BUG-18]", async () => {
+  it("caches the fallback so a bad image does not re-fetch on every request", async () => {
+    origin = await startOrigin({
+      "/broken.png": { body: UNDECODABLE, contentType: "image/png" },
+    });
+
+    await get({ image: `${origin.url}/broken.png`, width: "100" });
+    await get({ image: `${origin.url}/broken.png`, width: "100" });
+
+    // the inputs are unchanged, so the retry would fail identically; re-fetching
+    // it every time is the amplification this issue exists to remove
+    expect(origin.hits["/broken.png"]).toBe(1);
+  });
+
+  it("falls back for undecodable ascii payloads too [BUG-18]", async () => {
     origin = await startOrigin({
       "/broken.png": { body: Buffer.from("not an image at all"), contentType: "image/png" },
     });
 
     const res = await get({ image: `${origin.url}/broken.png`, width: "100" });
 
-    // it used to come back 200 with the garbage intact. It now reaches sharp,
-    // which fails — the 500 is BUG-26, tracked separately
-    expect(res.statusCode).toBe(500);
-    expect(res.rawPayload.toString()).not.toBe("not an image at all");
+    // the same 200 the gif false positive used to produce, reached deliberately
+    // this time: the probe is never consulted, sharp fails, and the fallback runs
+    expect(res.statusCode).toBe(200);
+    expect(res.rawPayload.toString()).toBe("not an image at all");
   });
 
-  it("returns a 500 when the origin is unreachable", async () => {
+  it("reports an unreachable origin as a bad gateway, not an internal error", async () => {
     const res = await get({ image: "http://127.0.0.1:1/nope.jpg" });
 
-    expect(res.statusCode).toBe(500);
+    // failing to reach upstream is not a fault of this proxy
+    expect(res.statusCode).toBe(502);
   });
 });
 
@@ -350,20 +365,38 @@ describe("GET /cache — SSRF [BUG-25]", () => {
   });
 });
 
-describe("GET /cache — no upstream limits [BUG-24]", () => {
-  it("waits on a slow origin with no timeout of its own", async () => {
+describe("GET /cache — upstream limits [BUG-24]", () => {
+  it("tolerates an origin that is slow but inside the timeout", async () => {
     const jpeg = await makeJpeg({ width: 100, height: 100, quality: 80 });
     origin = await startOrigin({
-      "/slow.jpg": { body: jpeg, contentType: "image/jpeg", delayMs: 1_500 },
+      "/slow.jpg": { body: jpeg, contentType: "image/jpeg", delayMs: 150 },
     });
 
-    const startedAt = Date.now();
-    const res = await get({ image: `${origin.url}/slow.jpg` });
+    const slowApp = buildServer({ logger: false, upstreamTimeoutMs: 2_000 });
+    const res = await slowApp.inject({
+      method: "GET",
+      url: "/cache",
+      query: { image: `${origin.url}/slow.jpg` },
+    });
+    await slowApp.close();
 
-    // axios is configured with no `timeout`, so a slow origin holds the worker
-    // for as long as it likes
     expect(res.statusCode).toBe(200);
-    expect(Date.now() - startedAt).toBeGreaterThanOrEqual(1_400);
+  });
+
+  it("refuses an upstream body over the configured ceiling", async () => {
+    const jpeg = await makeJpeg({ width: 800, height: 600, quality: 100 });
+    origin = await startOrigin({ "/big.jpg": { body: jpeg, contentType: "image/jpeg" } });
+
+    const tinyApp = buildServer({ logger: false, maxUpstreamBytes: 1_024 });
+    const res = await tinyApp.inject({
+      method: "GET",
+      url: "/cache",
+      query: { image: `${origin.url}/big.jpg` },
+    });
+    await tinyApp.close();
+
+    expect(jpeg.byteLength).toBeGreaterThan(1_024);
+    expect(res.statusCode).toBe(502);
   });
 });
 
@@ -457,7 +490,7 @@ describe("bug ledger", () => {
     expect(res.headers["content-type"]).not.toContain("text/html");
   });
 
-  it.fails("BUG-26: an undecodable payload should fall back, not 500", async () => {
+  it("BUG-26: an undecodable payload should fall back, not 500", async () => {
     origin = await startOrigin({
       "/broken.png": { body: UNDECODABLE, contentType: "image/png" },
     });
@@ -475,15 +508,23 @@ describe("bug ledger", () => {
     expect(res.statusCode).toBeGreaterThanOrEqual(400);
   });
 
-  it.fails("BUG-24: a slow origin should be cut off by a request timeout", async () => {
+  it("BUG-24: a slow origin should be cut off by a request timeout", async () => {
     const jpeg = await makeJpeg({ width: 100, height: 100, quality: 80 });
     origin = await startOrigin({
       "/slow.jpg": { body: jpeg, contentType: "image/jpeg", delayMs: 1_500 },
     });
 
-    const res = await get({ image: `${origin.url}/slow.jpg` });
+    // an explicit short timeout rather than the production default, so the test
+    // asserts the mechanism without depending on what that default happens to be
+    const impatient = buildServer({ logger: false, upstreamTimeoutMs: 100 });
+    const res = await impatient.inject({
+      method: "GET",
+      url: "/cache",
+      query: { image: `${origin.url}/slow.jpg` },
+    });
+    await impatient.close();
 
-    expect(res.statusCode).toBeGreaterThanOrEqual(500);
+    expect(res.statusCode).toBe(504);
   });
 
   it("BUG-23: concurrent cold requests coalesce to one fetch", async () => {

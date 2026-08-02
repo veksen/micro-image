@@ -218,7 +218,34 @@ export function getSmallestImage(image1: Buffer, image2: Buffer): Buffer {
   return image1.byteLength < image2.byteLength ? image1 : image2;
 }
 
-export async function downloadImage(url: string) {
+/**
+ * Long enough for a slow origin serving a large original, short enough that a
+ * hung upstream does not hold a worker indefinitely. Override with
+ * UPSTREAM_TIMEOUT_MS.
+ */
+export const DEFAULT_UPSTREAM_TIMEOUT_MS = 10_000;
+
+/**
+ * A ceiling on what one upstream response may cost in memory. Anything larger
+ * is refused mid-stream rather than buffered. Override with UPSTREAM_MAX_BYTES.
+ */
+export const DEFAULT_MAX_UPSTREAM_BYTES = 32 * 1024 * 1024;
+
+function readPositiveEnv(name: string, fallback: number): number {
+  const configured = Number(process.env[name]);
+
+  return Number.isFinite(configured) && configured > 0 ? configured : fallback;
+}
+
+export interface DownloadLimits {
+  timeoutMs?: number;
+  maxBytes?: number;
+}
+
+export async function downloadImage(url: string, limits: DownloadLimits = {}) {
+  const maxBytes =
+    limits.maxBytes ?? readPositiveEnv("UPSTREAM_MAX_BYTES", DEFAULT_MAX_UPSTREAM_BYTES);
+
   // responseType "arraybuffer" resolves to a Buffer under Node's adapter, but
   // axios types `data` as `any` without this. Stating it here is what lets the
   // route use the body directly: the previous Buffer.from(data, "binary") was
@@ -228,11 +255,30 @@ export async function downloadImage(url: string) {
     responseType: "arraybuffer",
     httpAgent,
     httpsAgent,
+    timeout:
+      limits.timeoutMs ?? readPositiveEnv("UPSTREAM_TIMEOUT_MS", DEFAULT_UPSTREAM_TIMEOUT_MS),
+    // axios tracks the running total and destroys the stream once it is passed,
+    // so an oversized body is refused rather than fully buffered first.
+    maxContentLength: maxBytes,
+    maxBodyLength: maxBytes,
   });
+}
+
+/**
+ * Failing to obtain the image is never an error *of the proxy*, so it must not
+ * read as a 500. A timeout is reported as one, everything else as a bad gateway.
+ */
+export function upstreamErrorStatus(error: unknown): number {
+  const code = axios.isAxiosError(error) ? error.code : undefined;
+
+  return code === "ECONNABORTED" || code === "ETIMEDOUT" ? 504 : 502;
 }
 
 export interface BuildServerOptions {
   logger?: boolean;
+  /** Overrides the env-configured limits. Mainly so tests can use a short timeout. */
+  upstreamTimeoutMs?: number;
+  maxUpstreamBytes?: number;
 }
 
 /**
@@ -288,68 +334,106 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
     // Concurrent requests that reach here for the same id share one download
     // and one transform. Everything inside runs once; every caller gets its
     // result and sets its own headers from it.
-    const result = await coalesce(id, async () => {
-      const image = await downloadImage(request.query.image);
+    let result;
 
-      // axios types response header values as `AxiosHeaderValue | undefined`.
-      // What reaches the wire is whatever resolveResponseMime is willing to
-      // vouch for, never the raw header.
-      const upstreamContentType = resolveResponseMime(
-        image.headers["content-type"] as string | undefined
-      );
-
-      // Not transformable, so relay it. It is cached too: the proxy is willing
-      // to serve these bytes repeatedly, and an SVG that re-downloads from the
-      // origin on every request is the same upstream load the cache exists to
-      // remove.
-      if (!isSupported(upstreamContentType)) {
-        const body = image.data;
-        toCache(id, { contentType: upstreamContentType, buffer: body });
-        return { contentType: upstreamContentType, body };
-      }
-
-      const imageBuffer = image.data;
-
-      // animated gif, return as is. The mime guard matters: the animation probe
-      // reads fixed offsets that carry unrelated data in other formats, so
-      // running it on a non-gif is asking for a false positive.
-      if (upstreamContentType === gifMime && isAnimatedGif(imageBuffer)) {
-        toCache(id, {
-          contentType: upstreamContentType,
-          buffer: imageBuffer,
+    try {
+      result = await coalesce(id, async () => {
+        const image = await downloadImage(request.query.image, {
+          timeoutMs: options.upstreamTimeoutMs,
+          maxBytes: options.maxUpstreamBytes,
         });
 
-        return { contentType: upstreamContentType, body: imageBuffer };
-      }
+        // axios types response header values as `AxiosHeaderValue | undefined`.
+        // What reaches the wire is whatever resolveResponseMime is willing to
+        // vouch for, never the raw header.
+        const upstreamContentType = resolveResponseMime(
+          image.headers["content-type"] as string | undefined
+        );
 
-      const outputMime = resolveOutputMime(requested.format, upstreamContentType);
+        // Not transformable, so relay it. It is cached too: the proxy is willing
+        // to serve these bytes repeatedly, and an SVG that re-downloads from the
+        // origin on every request is the same upstream load the cache exists to
+        // remove.
+        if (!isSupported(upstreamContentType)) {
+          const body = image.data;
+          toCache(id, { contentType: upstreamContentType, buffer: body });
+          return { contentType: upstreamContentType, body };
+        }
 
-      const compressedBuffer = await compress(imageBuffer, {
-        contentType: outputMime,
-        width: requested.width,
-        blur: requested.blur,
-        quality: requested.quality,
+        const imageBuffer = image.data;
+
+        // animated gif, return as is. The mime guard matters: the animation probe
+        // reads fixed offsets that carry unrelated data in other formats, so
+        // running it on a non-gif is asking for a false positive.
+        if (upstreamContentType === gifMime && isAnimatedGif(imageBuffer)) {
+          toCache(id, {
+            contentType: upstreamContentType,
+            buffer: imageBuffer,
+          });
+
+          return { contentType: upstreamContentType, body: imageBuffer };
+        }
+
+        const outputMime = resolveOutputMime(requested.format, upstreamContentType);
+
+        let compressedBuffer: Buffer;
+
+        try {
+          compressedBuffer = await compress(imageBuffer, {
+            contentType: outputMime,
+            width: requested.width,
+            blur: requested.blur,
+            quality: requested.quality,
+          });
+        } catch (error) {
+          // The bytes are already here and the client wants an image, so serve
+          // the original rather than turning one undecodable payload into a 500.
+          // Cached under the same id: the inputs are unchanged, so a repeat of
+          // this request would fail the same way, and not caching it would let a
+          // deterministically bad image re-fetch from the origin on every hit.
+          request.log.warn(
+            { err: error, image: request.query.image, outputMime },
+            "transform failed, serving the original bytes"
+          );
+
+          toCache(id, {
+            contentType: upstreamContentType,
+            buffer: imageBuffer,
+          });
+
+          return { contentType: upstreamContentType, body: imageBuffer };
+        }
+
+        // Use the smallest of the two, but only when both are the same format.
+        // Handing back the original because it happens to be smaller would answer
+        // `?format=webp` with jpeg bytes labelled image/webp.
+        const converted = outputMime !== upstreamContentType;
+        const imageBufferToUse = converted
+          ? compressedBuffer
+          : getSmallestImage(compressedBuffer, imageBuffer);
+
+        // The original survives only on the un-converted path, so it is still the
+        // upstream mime; anything else is what we just encoded.
+        const servedMime = imageBufferToUse === imageBuffer ? upstreamContentType : outputMime;
+
+        toCache(id, {
+          contentType: servedMime,
+          buffer: imageBufferToUse,
+        });
+
+        return { contentType: servedMime, body: imageBufferToUse };
       });
+    } catch (error) {
+      const status = upstreamErrorStatus(error);
 
-      // Use the smallest of the two, but only when both are the same format.
-      // Handing back the original because it happens to be smaller would answer
-      // `?format=webp` with jpeg bytes labelled image/webp.
-      const converted = outputMime !== upstreamContentType;
-      const imageBufferToUse = converted
-        ? compressedBuffer
-        : getSmallestImage(compressedBuffer, imageBuffer);
+      request.log.warn(
+        { err: error, image: request.query.image, status },
+        "could not fetch the image from upstream"
+      );
 
-      // The original survives only on the un-converted path, so it is still the
-      // upstream mime; anything else is what we just encoded.
-      const servedMime = imageBufferToUse === imageBuffer ? upstreamContentType : outputMime;
-
-      toCache(id, {
-        contentType: servedMime,
-        buffer: imageBufferToUse,
-      });
-
-      return { contentType: servedMime, body: imageBufferToUse };
-    });
+      reply.code(status);
+      return { error: "could not fetch the image from upstream" };
+    }
 
     return send(result.contentType, result.body);
   });
