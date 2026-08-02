@@ -95,19 +95,41 @@ jobs:
           npm run bench -w apps/cache
           npm run bench -w packages/micro-image-image
 
-      # "[skip ci]" is load-bearing: without it this push retriggers the
-      # workflow, which appends another point, which pushes again.
+      # "[skip ci]" is load-bearing twice over. Without it this push retriggers
+      # the workflow, which appends another point, which pushes again. It also
+      # guarantees this commit never carries the Test and Benchmark checks, which
+      # is why the push has to bypass the ruleset on main rather than satisfy it.
+      #
+      # GITHUB_TOKEN cannot do that. It authenticates as the GitHub Actions
+      # integration, and a user-owned repository has no organization for that
+      # integration to belong to, so it cannot be named a bypass actor:
+      # the API rejects it with "Actor GitHub Actions integration must be part of
+      # the ruleset source or owner organization". The bypass is granted to a
+      # user instead, so the push must present that user's token.
       - name: Commit history point
         if: github.event_name == 'push'
+        env:
+          PUSH_TOKEN: ${{ secrets.BENCHMARK_PUSH_TOKEN }}
         run: |
           if git diff --quiet -- apps/cache/benchmark/history.jsonl; then
             echo "no new history point to commit"
             exit 0
           fi
+          if [ -z "$PUSH_TOKEN" ]; then
+            echo "BENCHMARK_PUSH_TOKEN is unset; the ruleset on main would reject this push" >&2
+            exit 1
+          fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add apps/cache/benchmark/history.jsonl
           git commit -m "chore: record benchmark history point [skip ci]"
+          # actions/checkout leaves an Authorization header configured for
+          # github.com carrying GITHUB_TOKEN. It outranks credentials in the
+          # remote URL, so the token below is ignored unless the header goes
+          # first.
+          git config --local --unset-all http.https://github.com/.extraheader || true
+          git remote set-url origin \
+            "https://x-access-token:${PUSH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
           # another merge may have landed while this ran
           for attempt in 1 2 3; do
             git pull --rebase origin main && git push origin HEAD:main && exit 0
