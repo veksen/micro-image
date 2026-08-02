@@ -10,7 +10,16 @@ import {
   avifEffort,
 } from "./server";
 import { clearCache } from "./cache";
-import { makeGif, makeJpeg, makePng, startOrigin, type Origin } from "./test-helpers";
+import {
+  makeAnimatedWebp,
+  makeJpeg,
+  makeLoopingGif,
+  makePng,
+  makeSharpAnimatedGif,
+  startOrigin,
+  type Origin,
+} from "./test-helpers";
+import { frameCount } from "./is-animated";
 
 let app: FastifyInstance;
 let origin: Origin | undefined;
@@ -181,7 +190,7 @@ describe("GET /cache — happy path", () => {
   });
 
   it("returns an animated gif untouched", async () => {
-    const gif = makeGif({ delay: 10 });
+    const gif = makeLoopingGif({ frames: 3 });
     origin = await startOrigin({ "/anim.gif": { body: gif, contentType: "image/gif" } });
 
     const res = await get({ image: `${origin.url}/anim.gif`, width: "100" });
@@ -359,7 +368,7 @@ describe("GET /cache — AVIF output", () => {
   });
 });
 
-describe("GET /cache — animated-gif handling, end to end [BUG-18]", () => {
+describe("GET /cache — animation handling, end to end [BUG-18, #52]", () => {
   it("processes a quality-100 jpeg rather than short-circuiting on it", async () => {
     const jpeg = await makeJpeg({ width: 800, height: 600, quality: 100 });
     origin = await startOrigin({ "/cat.jpg": { body: jpeg, contentType: "image/jpeg" } });
@@ -372,13 +381,77 @@ describe("GET /cache — animated-gif handling, end to end [BUG-18]", () => {
   });
 
   it("still returns a real animated gif untouched", async () => {
-    const gif = makeGif({ delay: 10 });
+    const gif = await makeSharpAnimatedGif({ frames: 5 });
     origin = await startOrigin({ "/loop.gif": { body: gif, contentType: "image/gif" } });
 
     const res = await get({ image: `${origin.url}/loop.gif`, width: "2" });
 
     expect(res.statusCode).toBe(200);
     expect(Buffer.compare(res.rawPayload, gif)).toBe(0);
+  });
+
+  /**
+   * #52. The frame count is what has to be asserted, not just byte equality: a
+   * flattened animation is a perfectly valid file of the same format, so a test
+   * that only checks the status code or the mime cannot see the loss. Requesting
+   * a width is load-bearing — without one there is nothing to resize and the
+   * route would pass the bytes through for the wrong reason.
+   */
+  it("keeps every frame of a looping animated gif", async () => {
+    const gif = makeLoopingGif({ frames: 3 });
+    origin = await startOrigin({ "/loop.gif": { body: gif, contentType: "image/gif" } });
+
+    const res = await get({ image: `${origin.url}/loop.gif`, width: "2" });
+
+    expect(res.statusCode).toBe(200);
+    expect(await frameCount(res.rawPayload)).toBe(3);
+  });
+
+  it("keeps every frame of an animated webp", async () => {
+    const webp = await makeAnimatedWebp({ frames: 5 });
+    origin = await startOrigin({ "/loop.webp": { body: webp, contentType: "image/webp" } });
+
+    const res = await get({ image: `${origin.url}/loop.webp`, width: "8" });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.headers["content-type"]).toContain("image/webp");
+    expect(await frameCount(res.rawPayload)).toBe(5);
+    expect(Buffer.compare(res.rawPayload, webp)).toBe(0);
+  });
+
+  it("keeps every frame when a format conversion was requested", async () => {
+    // Transcoding an animation to a format that can hold it is ADR 0010 rule 3,
+    // still proposed and dependent on a resource ceiling that does not exist
+    // yet. This pins what ships in the meantime rather than endorsing it:
+    // preserving the frames outranks honouring ?format=, because the reverse
+    // silently destroys the image.
+    const gif = await makeSharpAnimatedGif({ frames: 4 });
+    origin = await startOrigin({ "/loop.gif": { body: gif, contentType: "image/gif" } });
+
+    const res = await get({ image: `${origin.url}/loop.gif`, width: "8", format: "webp" });
+
+    expect(res.statusCode).toBe(200);
+    expect(await frameCount(res.rawPayload)).toBe(4);
+  });
+
+  it("still resizes a single-frame gif", async () => {
+    const gif = await makeSharpAnimatedGif({ frames: 1, width: 64, height: 64 });
+    origin = await startOrigin({ "/still.gif": { body: gif, contentType: "image/gif" } });
+
+    const res = await get({ image: `${origin.url}/still.gif`, width: "16" });
+
+    const sharp = (await import("sharp")).default;
+    expect((await sharp(res.rawPayload).metadata()).width).toBe(16);
+  });
+
+  it("still resizes a single-frame webp", async () => {
+    const webp = await makeAnimatedWebp({ frames: 1, width: 64, height: 64 });
+    origin = await startOrigin({ "/still.webp": { body: webp, contentType: "image/webp" } });
+
+    const res = await get({ image: `${origin.url}/still.webp`, width: "16" });
+
+    const sharp = (await import("sharp")).default;
+    expect((await sharp(res.rawPayload).metadata()).width).toBe(16);
   });
 });
 
@@ -389,8 +462,9 @@ describe("GET /cache — animated-gif handling, end to end [BUG-18]", () => {
  * like "not an image at all" was swallowed by the animated-gif false positive
  * (byte 13 lands on 'a', 0x61, which shares a bit with the 0x21 mask) and handed
  * straight back with a 200, never reaching sharp. Only an all-zero buffer got
- * through. Now that the probe is gif-only and matches by equality, any
- * undecodable payload reaches sharp.
+ * through. The probe now asks the decoder instead of reading offsets, and a
+ * payload the decoder rejects is reported as not animated, so any undecodable
+ * payload reaches sharp.
  */
 const UNDECODABLE = Buffer.alloc(64);
 
@@ -496,7 +570,7 @@ describe("GET /cache — byte fidelity [BUG-19]", () => {
     // Buffer.from(buffer, "binary") ignores the encoding when the input is
     // already a Buffer, so this is a needless full copy rather than corruption.
     // The wasted copy is measured in the benchmark, not asserted here.
-    const gif = makeGif({ delay: 10 });
+    const gif = makeLoopingGif({ frames: 3 });
     origin = await startOrigin({ "/anim.gif": { body: gif, contentType: "image/gif" } });
 
     const res = await get({ image: `${origin.url}/anim.gif` });

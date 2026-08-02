@@ -22,7 +22,7 @@ import { buildServer } from "../src/server";
 import { clearCache, cacheBytes, cacheSize, cacheMaxBytes, setCacheMaxBytes } from "../src/cache";
 import { execFileSync } from "child_process";
 import os from "os";
-import { makeGif, startOrigin, type Origin } from "../src/test-helpers";
+import { makeLoopingGif, startOrigin, type Origin } from "../src/test-helpers";
 import { supportedMimes } from "../src/server";
 import { photoJpeg, photoPng, photoWebp } from "./fixtures";
 import { calibrate, type Calibration } from "./calibration";
@@ -213,7 +213,10 @@ async function buildScenarios(): Promise<Scenario[]> {
     {
       name: "animated gif",
       path: "/anim.gif",
-      body: makeGif({ delay: 10 }),
+      // A real looping GIF, not the hand-built container this used to carry.
+      // That one was undecodable, so with the #52 fix in place it would take
+      // the error path rather than the passthrough it is here to measure.
+      body: makeLoopingGif({ frames: 8, size: 64 }),
       contentType: "image/gif",
       query: { width: "400" },
       note: "correctly passed through untouched",

@@ -4,7 +4,7 @@ import Fastify, { FastifyInstance, FastifyRequest } from "fastify";
 import axios from "axios";
 import sharp from "sharp";
 import { buildId, fromCache, toCache } from "./cache";
-import { isAnimatedGif } from "./is-animated-gif";
+import { isAnimated } from "./is-animated";
 import { coalesce } from "./coalesce";
 
 const httpAgent = new http.Agent({ keepAlive: true });
@@ -401,10 +401,16 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
 
         const imageBuffer = image.data;
 
-        // animated gif, return as is. The mime guard matters: the animation probe
-        // reads fixed offsets that carry unrelated data in other formats, so
-        // running it on a non-gif is asking for a false positive.
-        if (upstreamContentType === gifMime && isAnimatedGif(imageBuffer)) {
+        // Animated input is relayed untouched, whatever container it arrived in.
+        // sharp loads one page by default, so `resize()` returns a valid file
+        // with every frame after the first silently discarded — 30 frames in,
+        // 1 out, no error and no warning. Passing the bytes through keeps the
+        // animation; the alternative is a transform that corrupts it.
+        //
+        // No mime guard: the probe asks the decoder rather than reading fixed
+        // offsets, so it cannot mistake a JPEG's quantization table for a GIF
+        // extension block the way the guard this replaced could.
+        if (await isAnimated(imageBuffer)) {
           toCache(id, {
             contentType: upstreamContentType,
             buffer: imageBuffer,
