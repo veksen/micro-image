@@ -123,6 +123,7 @@ export const formatMimes: Record<string, string> = {
   jpeg: "image/jpeg",
   png: "image/png",
   webp: "image/webp",
+  avif: "image/avif",
   gif: gifMime,
 };
 
@@ -179,8 +180,43 @@ export function resolveResponseMime(upstream: string | undefined): string {
   return imageMimePattern.test(bare) ? bare : fallbackMime;
 }
 
+/** Encoder quality when the request did not ask for one. */
+const defaultQuality = 75;
+
+/**
+ * AVIF gets its own default, because the shared 75 is the wrong number for it.
+ *
+ * Measured on the benchmark photo fixture at 400w
+ * (`docs/research/image-format-coverage.md` §7): `avif({quality: 50})` is 4,990
+ * bytes against mozjpeg quality 75's 8,205 — 60.8% — and more faithful
+ * (RMSE 2.87 vs 3.76). At quality 75 AVIF is 8,663 bytes, *larger* than mozjpeg,
+ * so encoding it at the shared default would have made `?format=avif` a
+ * regression rather than a saving.
+ */
+export const avifQuality = 50;
+
+/**
+ * aom's speed preset, and the only defensible point on a cold path.
+ *
+ * `effort` is not monotonic at the fast end: 0 and 2 produce *larger* files than
+ * 4 (6,577 and 6,842 bytes vs 4,990), because aom's fastest presets disable the
+ * rate-distortion search that makes AVIF worth using in the first place. Going
+ * the other way, 6 saves a further 0.8% for 2.4x the time and 9 saves 0.8% for
+ * 12.6x. So 4 is both the smallest output available cheaply and the knee.
+ *
+ * It is not cheap, and the `jpeg -> avif` benchmark scenario exists to keep that
+ * visible. Measured there on darwin-arm64: 34.8ms against the plain jpeg path's
+ * 11.8ms, and 138ms of CPU against its 14ms — roughly 3x the wall time but 10x
+ * the CPU, because aom threads across cores and wall time hides that.
+ *
+ * Read the research table's "CPU x mozjpeg" column with care: every cell in it
+ * reproduces exactly as that row's own `ms p50 / 10.96`, so it is a wall-time
+ * ratio despite the name. Its 3.1x is the wall figure, not the CPU one.
+ */
+export const avifEffort = 4;
+
 export function imageFromMime(image: sharp.Sharp, mime?: string, quality?: number): sharp.Sharp {
-  const effectiveQuality = quality ?? 75;
+  const effectiveQuality = quality ?? defaultQuality;
 
   switch (mime) {
     case "image/png":
@@ -189,6 +225,9 @@ export function imageFromMime(image: sharp.Sharp, mime?: string, quality?: numbe
       return image.png();
     case "image/webp":
       return image.webp({ quality: effectiveQuality });
+    case "image/avif":
+      // An explicit ?quality= still wins: the default is a default, not a cap.
+      return image.avif({ quality: quality ?? avifQuality, effort: avifEffort });
     case "image/gif":
       return image.gif();
     case "image/jpg":
