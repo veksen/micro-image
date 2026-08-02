@@ -110,5 +110,11 @@ The north star is hit when all of these are true:
 
 ## Open decisions
 
-Seven design questions are unresolved and tracked as proposed ADRs in `docs/adr/`
-(`0002`–`0008`). Resolve one before writing code that assumes an answer.
+Seven design questions are unresolved and tracked as ADRs in `docs/adr/` (`0002`–`0008`).
+Resolve one before writing code that assumes an answer.
+
+Six are `proposed`. `0003` (srcset ladder) is `blocked`: its cost model was arithmetic rather
+than measurement, and checking it inverted the answer. It stays blocked until the benchmark
+supplies a bytes-vs-width curve over real content and codecs. Prefer a blocked ADR to a
+plausible one — a decision recorded on an assumption is harder to dislodge later than an
+open question.

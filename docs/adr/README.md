@@ -22,9 +22,12 @@ The consequences — what this makes easy, what it makes hard, what we gave up.>
 
 ## Status lifecycle
 
-- `proposed` — drafted, not yet ratified. **Seven of the ADRs here are proposed.** They are
+- `proposed` — drafted, not yet ratified. **Six of the ADRs here are proposed.** They are
   open questions from `VISION.md`, each with a suggested default that has not been ratified.
   Resolve one before writing code that assumes its answer, rather than settling it implicitly.
+- `blocked` — the decision cannot be made yet, because it rests on something not known. Say
+  what would unblock it and how it would be measured. A `blocked` ADR is more useful than a
+  `proposed` one built on an assumption, and it stops the next reader from ratifying a guess.
 - `accepted` — in effect. This is the default for a decision already live in the code.
 - `superseded by NNNN` — replaced by a later ADR. Never delete an ADR; supersede it so the
   history of _why_ stays intact.
