@@ -90,6 +90,6 @@ Single-context: root `CONTEXT.md` + `docs/adr/`. See `docs/agents/domain.md`.
 - `CONTEXT.md` — package map, glossary, conventions, toolchain pins, known bugs
 - `VISION.md` — north star, architecture, non-goals, success criteria
 - `BUGS.md` — the bug ledger and the `it.fails` convention that tracks it
-- `docs/adr/` — architecture decisions, including seven still open
+- `docs/adr/` — architecture decisions, including nine still open
 - `.claude/rules/` — always-on: git workflow, research, mistakes
 - `.claude/skills/` — on-demand: testing conventions, the `ImageMeta` contract
