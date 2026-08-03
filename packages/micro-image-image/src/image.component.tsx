@@ -1,5 +1,4 @@
-import React, { useEffect, useMemo, useRef } from "react";
-import useImage from "./use-image.hook";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useImageCacheConfig } from "./image-cache-provider";
 import { IProviderOptions } from "./providers/base";
 
@@ -25,6 +24,9 @@ const generateSrcSet = ({
     .map((index) => {
       const width = index * 100;
       const url = generator({
+        // `quality` leads the spread so a caller's own value wins. It used to
+        // trail it, which meant generatorOptions.quality was accepted and then
+        // silently overwritten with the default.
         quality: defaultQuality,
         ...defaultGeneratorOptions,
         url: cacheProxyUrl,
@@ -53,15 +55,15 @@ function Image<GeneratorOptions extends IProviderOptions = IProviderOptions>(
   const imageRef = useRef<HTMLImageElement | null>(null);
   const observerRef = useRef<ResizeObserver | null>(null);
 
-  // `quality` leads the spread so a caller's own value wins. It used to trail
-  // it, which meant generatorOptions.quality was accepted and then overwritten.
-  const imageSrc = config.generateUrl({
-    quality: defaultQuality,
-    ...config.defaultGeneratorOptions,
-    ...props.generatorOptions,
-    url: config.cacheProxyUrl,
-    src: props.src,
-  });
+  /**
+   * The src that failed to load, rather than a boolean.
+   *
+   * Comparing it against the current src is what makes recovery automatic: a
+   * caller pointing the component at a different image gets a fresh attempt,
+   * where a boolean would have latched and rendered nothing forever.
+   */
+  const [failedSrc, setFailedSrc] = useState<string | null>(null);
+  const failed = failedSrc === props.src;
 
   const blurredImageSrc = config.generateUrl({
     ...config.defaultGeneratorOptions,
@@ -71,8 +73,6 @@ function Image<GeneratorOptions extends IProviderOptions = IProviderOptions>(
     width: 500,
     blur: 5,
   });
-
-  const { error } = useImage(imageSrc);
 
   const srcSet = useMemo(() => {
     return generateSrcSet({
@@ -119,7 +119,9 @@ function Image<GeneratorOptions extends IProviderOptions = IProviderOptions>(
     return () => {
       observerRef.current?.disconnect();
     };
-  }, [srcSet]);
+    // `failed` unmounts and remounts the element, so the observer has to be
+    // pointed at the new node rather than left watching the detached one
+  }, [srcSet, failed]);
 
   return (
     <div
@@ -142,9 +144,10 @@ function Image<GeneratorOptions extends IProviderOptions = IProviderOptions>(
           left: 0,
         }}
       >
-        {!error && (
+        {!failed && (
           <img
             src={blurredImageSrc}
+            onError={() => setFailedSrc(props.src)}
             ref={imageRef}
             style={{
               width: "100%",

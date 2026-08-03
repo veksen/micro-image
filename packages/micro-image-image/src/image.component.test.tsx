@@ -3,7 +3,7 @@
  */
 import React from "react";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { render, act, cleanup } from "@testing-library/react";
+import { render, act, cleanup, fireEvent } from "@testing-library/react";
 import Image from "./image.component";
 import { FakeImage, FakeResizeObserver, installDomStubs } from "./test-helpers";
 
@@ -138,49 +138,40 @@ describe("Image — initial paint has no srcset [BUG-10]", () => {
   });
 });
 
-describe("Image — the discarded preflight fetch [BUG-1]", () => {
-  it("downloads a full-size variant whose bytes are never used", () => {
-    renderImage();
-
-    // useImage(imageSrc) is called with the un-sized url — the largest
-    // variant the proxy will produce — and only `error` is read from it
-    expect(FakeImage.instances).toHaveLength(1);
-    expect(FakeImage.instances[0]!.src).toBe(
-      `${PROXY}?image=${encodeURIComponent(SRC)}&quality=75`
-    );
-  });
-
-  it("requests a url that is not the one the img element renders", () => {
-    const { img } = renderImage();
-
-    expect(FakeImage.instances[0]!.src).not.toBe(img()!.getAttribute("src"));
-  });
-
-  it("does not appear in the srcset either, so the bytes are pure waste", async () => {
-    const { img } = renderImage();
-
-    act(() => FakeResizeObserver.instances[0]!.resizeTo(640));
-    await flushFrame();
-
-    expect(img()!.srcset).not.toContain(FakeImage.instances[0]!.src);
-  });
-});
-
-describe("Image — load state is not used [BUG-9]", () => {
-  it("renders the img before the preflight image has loaded", () => {
-    const { img } = renderImage();
-
-    // `loaded` and `fetching` come back from useImage but nothing gates on them
-    expect(img()).not.toBeNull();
-  });
-
-  it("removes the img only once the preflight image errors", () => {
+describe("Image — failure", () => {
+  it("removes the img when the rendered element itself fails", () => {
     const { img } = renderImage();
     expect(img()).not.toBeNull();
 
-    act(() => FakeImage.instances[0]!.fireError());
+    act(() => fireEvent.error(img()!));
 
     expect(img()).toBeNull();
+  });
+
+  it("tries again when the caller points at a different src", () => {
+    const { img, rerender } = renderImage();
+
+    act(() => fireEvent.error(img()!));
+    expect(img()).toBeNull();
+
+    rerender(<Image src="https://example.com/dog.jpg" width={800} height={600} alt="a dog" />);
+
+    // a boolean would have latched here and rendered nothing forever
+    expect(img()).not.toBeNull();
+  });
+
+  it("observes the remounted element, not the one it replaced", async () => {
+    const { img, rerender } = renderImage();
+
+    act(() => fireEvent.error(img()!));
+    rerender(<Image src="https://example.com/dog.jpg" width={800} height={600} alt="a dog" />);
+
+    const observer = FakeResizeObserver.instances.at(-1)!;
+    expect(observer.observed[0]).toBe(img());
+
+    act(() => observer.resizeTo(640));
+    await flushFrame();
+    expect(img()!.sizes).toBe("700px");
   });
 });
 
@@ -197,8 +188,12 @@ describe("bug ledger", () => {
     expect(img()!.getAttribute("sizes")).not.toBeNull();
   });
 
-  it.fails("BUG-1: no image should be fetched whose bytes are discarded", () => {
+  it("BUG-1: no image should be fetched whose bytes are discarded", () => {
     const { img } = renderImage();
+
+    // nothing constructs `new Image()` any more, so there is no fetch outside
+    // the element; the invariant below still holds if one is ever added back
+    expect(FakeImage.instances).toHaveLength(0);
 
     const rendered = new Set(
       [
