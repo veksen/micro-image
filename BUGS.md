@@ -186,19 +186,36 @@ provider is covered without editing it. The fix is a breaking change to a publis
 gated on [ADR 0011](docs/adr/0011-provider-selection.md), which is still `proposed` — see
 [#40](https://github.com/veksen/micro-image/issues/40).
 
+> **BUG-8 and BUG-9 were closed by deleting the hook, not by repairing it** — see
+> [#16](https://github.com/veksen/micro-image/issues/16). Both lived in
+> `useImage`, whose only caller wanted error detection, which does not need a
+> second download. The component now reads `onError` off the element it already
+> renders, so the hook is gone. `use-image.hook.tsx` and its test file went with
+> it, which is why the BUG-8 ledger test is not in the suite any more: the code
+> it pinned no longer exists.
+>
+> BUG-9 never had a ledger test, although the row claimed one. `loaded` and
+> `fetching` gating nothing is an absence, and an `it.fails` cannot assert that a
+> value is unused. The two characterization tests were the whole coverage.
+>
+> This narrows what BUG-10 means. Error detection used to run against a URL the
+> page never displayed; it now runs against the rendered element, so a failing
+> placeholder hides the image where it previously showed a broken one. The first
+> paint still ships no `srcset`, so BUG-10 stays open.
+
 ## Coverage
 
 | #   | Bug                                                                 | Test file                                                   | Ledger                                                             |
 | --- | ------------------------------------------------------------------- | ----------------------------------------------------------- | ------------------------------------------------------------------ |
-| 1   | `useImage` downloads a full-size variant and discards the bytes     | `image.component.test.tsx`                                  | yes                                                                |
+| 1   | `useImage` downloads a full-size variant and discards the bytes     | `image.component.test.tsx`                                  | **fixed** ([#16](https://github.com/veksen/micro-image/issues/16)) |
 | 2   | blur radius flattened to a boolean end-to-end                       | `providers/micro-image.test.ts`, `image.component.test.tsx` | **fixed** ([#9](https://github.com/veksen/micro-image/issues/9))   |
 | 3   | `quality` accepted by the client, ignored by the proxy              | `server.test.ts`                                            | **fixed** ([#9](https://github.com/veksen/micro-image/issues/9))   |
 | 4   | `format` accepted by the client, ignored by the proxy               | `server.test.ts`                                            | **fixed** ([#9](https://github.com/veksen/micro-image/issues/9))   |
 | 5   | `generateUrl` always emits `blur=false`                             | `providers/micro-image.test.ts`                             | **fixed** ([#9](https://github.com/veksen/micro-image/issues/9))   |
 | 6   | imgproxy single-element option arrays are correct by accident       | `providers/imgproxy.test.ts`                                | **fixed** ([#11](https://github.com/veksen/micro-image/issues/11)) |
 | 7   | duplicate `if (!imageRef.current) return;`                          | —                                                           | **fixed** ([#15](https://github.com/veksen/micro-image/issues/15)) |
-| 8   | `useImage` cleanup calls `removeEventListener` on property handlers | `use-image.hook.test.tsx`                                   | yes                                                                |
-| 9   | `loaded` / `fetching` returned but never gate rendering             | `image.component.test.tsx`                                  | yes                                                                |
+| 8   | `useImage` cleanup calls `removeEventListener` on property handlers | — (see correction)                                          | **fixed** ([#16](https://github.com/veksen/micro-image/issues/16)) |
+| 9   | `loaded` / `fetching` returned but never gate rendering             | — (see correction)                                          | **fixed** ([#16](https://github.com/veksen/micro-image/issues/16)) |
 | 10  | first paint ships no `srcset` / `sizes` for the preload scanner     | `image.component.test.tsx`                                  | yes                                                                |
 | 11  | `getImageProportions` downloads the full original for two integers  | `image-utils.test.ts`                                       | yes                                                                |
 | 12  | `Compare` clobbers `onload` and never cleans up                     | `compare.component.test.tsx`                                | yes                                                                |

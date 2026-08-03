@@ -58,8 +58,11 @@ of settling it implicitly in code:
 
 ## Today's gap
 
-The component does not implement this yet. It currently generates a 20-entry srcset
-uncapped at intrinsic width, measures with a `ResizeObserver` after mount, fetches a blurred
-placeholder over the network, and calls `useImage` on a URL whose bytes are discarded. Those
-are BUG-1, BUG-2, and BUG-10 in `BUGS.md`, and vision milestone 1 is the work of closing them.
-Read the ledger tests before changing this code — they encode the target behavior.
+The component does not implement this yet. It currently generates a 19-entry srcset uncapped
+at intrinsic width, attaches it with a `ResizeObserver` after mount rather than on the first
+paint, and fetches a blurred placeholder over the network instead of inlining it. Those are
+BUG-2 and BUG-10 in `BUGS.md`, and vision milestone 1 is the work of closing them. Read the
+ledger tests before changing this code — they encode the target behavior.
+
+BUG-1 is closed. The `useImage` hook that called a URL whose bytes were discarded is gone, and
+the rendered element's own `onError` reports failure.
