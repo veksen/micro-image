@@ -12,10 +12,10 @@ case "$file" in
   */.claude/skills/design/better-colors/* | */.claude/skills/design/better-typography/*) exit 0 ;;
 esac
 
-# Only the languages oxfmt formats. It handles Markdown and CSS as well as JS/TS/JSON — a
+# Only the languages oxfmt formats. It handles Markdown, CSS and YAML as well as JS/TS/JSON — a
 # narrower list here lets an unformatted .md through the hook and straight into a CI failure.
 case "$file" in
-  *.ts | *.tsx | *.mts | *.cts | *.js | *.jsx | *.mjs | *.cjs | *.json | *.jsonc | *.css | *.md) ;;
+  *.ts | *.tsx | *.mts | *.cts | *.js | *.jsx | *.mjs | *.cjs | *.json | *.jsonc | *.css | *.md | *.yml | *.yaml) ;;
   *) exit 0 ;;
 esac
 
