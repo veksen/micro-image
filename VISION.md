@@ -68,7 +68,7 @@ All three, or it is just another image library.
 Neither half of container-width selection is new. `sizes="auto"` is a browser feature, and
 lazysizes has measured elements to set `sizes` since about 2014. micro-image combines them:
 build-time metadata puts a real `srcset` and `sizes` in the first paint, and a
-`ResizeObserver` only corrects it.
+`ResizeObserver` can only raise it.
 
 ## Architecture — three layers, one contract
 
@@ -84,7 +84,7 @@ interface ImageMeta {
   height: number; // intrinsic pixel height
   srcset: string; // capped at intrinsic width
   placeholder?: string; // data-URI LQIP or blurhash
-  sizes?: string; // initial sizes baked at build; the observer refines it at runtime
+  sizes?: string; // initial sizes baked at build; an observer may only raise it
 }
 ```
 
@@ -115,7 +115,7 @@ serve both the static-optimized and the dynamic path. See
 
 ### How container-width selection works
 
-The build knows the **image**. The observer knows the **container**.
+The build knows the **image**. The layout knows the **container**.
 
 - **Build time** emits `ImageMeta`: intrinsic dimensions (a reserved box, so no CLS and no
   typed dimensions), a `srcset` capped at intrinsic width, an inline LQIP, and an initial
@@ -123,7 +123,8 @@ The build knows the **image**. The observer knows the **container**.
 - **First paint** carries that `srcset` and `sizes` in the HTML, so the preload scanner
   starts the image before any JavaScript runs. This works on the hero image too, because it
   does not depend on `loading="lazy"`.
-- **At runtime** a `ResizeObserver` measures the container and writes the real `sizes`.
+- **At runtime** a `ResizeObserver` may raise `sizes` when the container is wider than the
+  bake assumed. It never lowers it (see below).
 
 `sizes="auto"` alone cannot do this. It needs `loading="lazy"`, because container width
 exists only after layout and the preload scanner runs before it. It trades early discovery
@@ -137,12 +138,21 @@ variant, the content around it does not move.
 it the exact container width with no JavaScript and no guess. An eager image, the one or few
 above the fold, has to start before layout, so only eager images need a baked `sizes`.
 
-**The baked `sizes` is load-bearing.** Browsers upgrade a `srcset` candidate on resize but
-never downgrade. Baked too large, the scanner fetches an oversized variant the observer
-cannot take back. Baked too small, the observer's correction costs a second fetch. The open
-design question is what the build bakes so that the observer's correction is usually a no-op.
-The starting answer is the simplest one, `100vw` capped at intrinsic width. The browser
-benchmark replaces it with whatever measures better.
+**The baked `sizes` is load-bearing.** Measured by the browser benchmark in Chromium on
+2026-10-13:
+
+- **Baked too large costs bytes no observer recovers.** Once the large candidate has loaded,
+  Chromium keeps it when `sizes` is lowered. While it is still downloading, a lowered `sizes`
+  starts the smaller candidate and does not cancel the large one: 213 KB instead of 175 KB for
+  a 768px column on a throttled 10 Mbps link. So an observer only ever raises `sizes`.
+- **`100vw` is too large outside full-bleed layouts.** An eager `100vw` image overfetched 2.5×
+  in a column, 3× in a grid cell and 8× as a thumbnail.
+- **A viewport-only bake cannot close that gap.** Closing it takes layout knowledge: CSS read
+  at build, a `sizes` written by the developer, or widths learned from traffic.
+
+Until the build can read layout, an eager image takes a `sizes` from the developer and falls
+back to the viewport capped at intrinsic width. A bake that errs small, raised by the
+observer, is not measured yet. Safari and Firefox are not measured yet.
 
 ### Shared core, thin adapters
 
