@@ -55,7 +55,7 @@ Every dependency is pinned to an explicit range. Nothing resolves `latest`.
 - **TypeScript** 7.0.2, the native port. It removed `baseUrl` and `moduleResolution: node10`
   and requires an explicit `rootDir` when emitting. Next.js cannot use its compiler API, so
   `apps/docs` sets `experimental.useTypeScriptCli`.
-- **oxlint** 1.76 (`.oxlintrc.json`) and **oxfmt** 0.61 (`.oxfmtrc.json`), replacing eslint
+- **oxlint** 1.88 (`.oxlintrc.json`) and **oxfmt** 0.73 (`.oxfmtrc.json`), replacing eslint
   and prettier. `turbo/no-undeclared-env-vars` has no oxlint equivalent and is simply gone;
   `turbo.json` `globalEnv` remains the only declaration of those vars.
 - **Tailwind** v4 in `apps/docs`, configured CSS-first in `src/globals.css`. There is no
