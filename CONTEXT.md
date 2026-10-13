@@ -129,8 +129,9 @@ ADR `0010-unimprovable-formats` records that.
 
 From `VISION.md`. Each step is independently useful and does not strictly require the next.
 
-1. **Fix the component runtime** — `sizes="auto"`, drop dead fetches, capped srcset,
-   aspect-ratio via CSS. No server changes.
+1. **Fix the component runtime** — `srcset` and `sizes` in the first paint (`auto` for lazy
+   images, a baked value the observer refines for eager ones), drop dead fetches, capped
+   srcset, aspect-ratio via CSS. No server changes.
 2. **Proxy quick wins** — `Cache-Control` on hits, request coalescing, `Accept`-based
    AVIF/WebP, and format in the cache key.
 3. **Proxy `?meta` endpoint** — retires `getImageProportions`, which downloads a whole image

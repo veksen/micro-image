@@ -14,7 +14,8 @@ _Avoid_: image data, image info, image metadata
 
 **Acquisition path**:
 One of the three ways an `ImageMeta` is obtained: build-time (static import), runtime
-(the proxy's `?meta` endpoint), or no-proxy (native srcset with `sizes="auto"`).
+(the proxy's `?meta` endpoint), or no-proxy (native srcset, with `sizes="auto"` for lazy
+images).
 _Avoid_: mode, strategy, flow
 
 **Intrinsic width**:
