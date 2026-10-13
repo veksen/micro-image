@@ -3,12 +3,51 @@
 ## North star
 
 > Write `<Image src="./hero.jpg" />` and get the correct-sized, format-optimized image
-> for the container it renders into — with no runtime measurement, no placeholder round
-> trip, no manual dimensions, no framework lock-in.
+> for the container it renders into — starting from the HTML alone, with no placeholder
+> round trip, no manual dimensions, no framework lock-in.
 
 The user should never type a query-string suffix, never hardcode width/height, and never
-wait on JavaScript for the browser to pick the right variant. **Container-width–driven
-selection is the selling point and must stay.**
+wait on JavaScript for the browser to start the right variant. JavaScript may refine a choice
+the HTML already made; it never makes the first one. **Container-width–driven selection is
+the core feature and must stay.**
+
+## Who it is for, in order
+
+1. **The maintainer's own sites**, including Query Doctor's. A feature none of them needs
+   waits.
+2. **Developers who self-host.** The packages are open source and the proxy runs anywhere.
+   Self-hosting is the default and stays fully supported.
+3. **A paid hosted proxy, later.** The open-source proxy, operated for people who don't want
+   to run it. It is a deployment, not a fork: every hosted feature exists in the self-hosted
+   proxy too. It takes no payment before the URL contract is frozen at 1.0, because a
+   customer's pages store those URLs.
+
+## What wins a trade-off, in order
+
+When two of these conflict, the higher one wins. Say which one lost in the PR.
+
+1. **Trust.** The code does what the docs say. URLs and props do not change without a
+   changeset. No framework adapter or launch ships before the core is stable.
+2. **Speed.** How fast an image loads end to end: the component's markup, the browser's
+   variant choice, and the proxy's response. This is the top workstream. Any part of the
+   stack can be replaced, the proxy's language included, but only when a benchmark shows the
+   replacement is faster.
+3. **Ease.** One import and a `src`. Ease is close to speed and loses only on a real
+   conflict. Example: the build plugin is an extra install step, accepted because it removes
+   a request from the critical path.
+
+Visibility and revenue are not values here. Decide on the three above.
+
+The packages stay on `0.0.x` until the API is ready to freeze, so breaking changes ship now,
+before outside users depend on them. On `0.0.x` a design decision is an experiment: the
+benchmark picks between candidates, and a better measurement reverses an earlier choice.
+
+## Dogfooding Query Doctor
+
+Run Query Doctor on any change that adds or alters a database (schema, queries,
+migrations), and record the result in the PR, useful or not. The PR does not merge before
+that. micro-image has no database today. A hosted proxy would likely add one, for accounts
+and usage metering.
 
 ## Why this exists
 
@@ -26,6 +65,11 @@ Existing responsive image solutions each miss at least one axis:
 The differentiator is **container-width selection + self-hosted proxy + framework-agnostic**.
 All three, or it is just another image library.
 
+Neither half of container-width selection is new. `sizes="auto"` is a browser feature, and
+lazysizes has measured elements to set `sizes` since about 2014. micro-image combines them:
+build-time metadata puts a real `srcset` and `sizes` in the first paint, and a
+`ResizeObserver` only corrects it.
+
 ## Architecture — three layers, one contract
 
 ### The `ImageMeta` contract
@@ -40,7 +84,7 @@ interface ImageMeta {
   height: number; // intrinsic pixel height
   srcset: string; // capped at intrinsic width
   placeholder?: string; // data-URI LQIP or blurhash
-  sizes?: string; // optional viewport-based hint for above-the-fold
+  sizes?: string; // initial sizes baked at build; the observer refines it at runtime
 }
 ```
 
@@ -69,6 +113,37 @@ serve both the static-optimized and the dynamic path. See
          Providers: micro-image, ipx, imgproxy, …
 ```
 
+### How container-width selection works
+
+The build knows the **image**. The observer knows the **container**.
+
+- **Build time** emits `ImageMeta`: intrinsic dimensions (a reserved box, so no CLS and no
+  typed dimensions), a `srcset` capped at intrinsic width, an inline LQIP, and an initial
+  `sizes`.
+- **First paint** carries that `srcset` and `sizes` in the HTML, so the preload scanner
+  starts the image before any JavaScript runs. This works on the hero image too, because it
+  does not depend on `loading="lazy"`.
+- **At runtime** a `ResizeObserver` measures the container and writes the real `sizes`.
+
+`sizes="auto"` alone cannot do this. It needs `loading="lazy"`, because container width
+exists only after layout and the preload scanner runs before it. It trades early discovery
+for accuracy, which is the wrong trade for the largest image on the page.
+
+**No jumping comes from the reserved box, not from the variant.** Build-time dimensions give
+every image an `aspect-ratio` box before any byte arrives. Lazy or eager, small or large
+variant, the content around it does not move.
+
+**Lazy and eager split the problem.** A lazy image loads after layout, so `sizes="auto"` gives
+it the exact container width with no JavaScript and no guess. An eager image, the one or few
+above the fold, has to start before layout, so only eager images need a baked `sizes`.
+
+**The baked `sizes` is load-bearing.** Browsers upgrade a `srcset` candidate on resize but
+never downgrade. Baked too large, the scanner fetches an oversized variant the observer
+cannot take back. Baked too small, the observer's correction costs a second fetch. The open
+design question is what the build bakes so that the observer's correction is usually a no-op.
+The starting answer is the simplest one, `100vw` capped at intrinsic width. The browser
+benchmark replaces it with whatever measures better.
+
 ### Shared core, thin adapters
 
 The build-time plugin ships as **`unplugin`** (Vite, Rollup, Webpack, esbuild, Rspack,
@@ -86,9 +161,12 @@ transform is a pure optimization.
 
 ## Non-goals
 
-- **Not a CDN.** The proxy is self-hosted; put a real CDN in front of it if you want offload.
+- **Not a CDN.** The open-source proxy resizes and caches; it does not do global edge
+  delivery. Put a real CDN in front of it if you want offload. How the hosted proxy delivers,
+  and who pays for bandwidth, is decided when the hosted proxy starts.
 - **Not a rewrite of `next/image`.** No layout modes, no `fill`, no intrinsic/responsive
-  interplay. `aspect-ratio` + `sizes="auto"` covers 95% of what those APIs bolt on.
+  interplay. `aspect-ratio` from build-time dimensions, plus a `srcset` and `sizes` in the
+  first paint, covers 95% of what those APIs bolt on.
 - **Not eliminating the proxy for static images.** Keeping the proxy authoritative avoids
   duplicating resize logic and lets one deployment serve static and dynamic uniformly.
 - **Not importing non-local URLs at build.** That would make CI depend on the external network.
@@ -97,7 +175,23 @@ transform is a pure optimization.
 
 ## Success criteria
 
-The north star is hit when all of these are true:
+**In twelve months**, each of these is measured and true:
+
+- **Works well.** It serves every image on the maintainer's sites in production, with no open
+  correctness bug in `BUGS.md` that a consumer could hit.
+- **Faster**, on three layers, each against a named alternative:
+  - **Proxy:** latency and throughput per transform, cold and warm, against imgproxy on the
+    same hardware and fixtures.
+  - **Component:** bytes served for the same container and source against `next/image`,
+    and no JS-gated request for static images.
+  - **End to end:** time until the image is painted (LCP when it is the largest element) on a
+    real page, against `next/image` and a plain `<img srcset>`.
+- **No jumping.** Every image reserves its box from build-time dimensions: zero layout shift
+  from images, lazy or eager.
+- **Easy.** A local image goes from install to optimized with one package, one plugin line,
+  and `<Image src alt />`. No width, height, or `sizes` typed by hand.
+
+**The north star** is hit when all of these are true:
 
 - A consumer writes `<Image src="./hero.jpg" alt="…" />` in React, Vue, Svelte, or Astro,
   installs the plugin, and gets an image that loads only the variant matching its container,
@@ -110,10 +204,10 @@ The north star is hit when all of these are true:
 
 ## Open decisions
 
-Nine design questions are unresolved and tracked as ADRs in `docs/adr/` (`0002`–`0010`).
+Ten design questions are unresolved and tracked as ADRs in `docs/adr/` (`0002`–`0011`).
 Resolve one before writing code that assumes an answer.
 
-Eight are `proposed`. `0003` (srcset ladder) is `blocked`: its cost model was arithmetic rather
+Nine are `proposed`. `0003` (srcset ladder) is `blocked`: its cost model was arithmetic rather
 than measurement, and checking it inverted the answer. It stays blocked until the benchmark
 supplies a bytes-vs-width curve over real content and codecs. Prefer a blocked ADR to a
 plausible one — a decision recorded on an assumption is harder to dislodge later than an
