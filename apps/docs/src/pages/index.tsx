@@ -50,14 +50,6 @@ export default function DocsIndex() {
       return;
     }
 
-    setYourImage((prev) => ({
-      ...prev,
-      error: false,
-      loading: true,
-      active: false,
-      proportions: null,
-    }));
-
     getImageProportions(yourImage.url)
       .then((proportions) => {
         setYourImage((prev) => ({
@@ -146,7 +138,14 @@ export default function DocsIndex() {
             placeholder="Image URL"
             value={yourImage.url}
             className="w-[100%] bg-mauve-5 dark:bg-mauvedark-5 text-mauve-12 dark:text-mauvedark-12 p-2 rounded-sm"
-            onChange={(e) => setYourImage((prev) => ({ ...prev, url: e.target.value }))}
+            onChange={(e) => {
+              const url = e.target.value;
+              setYourImage(
+                url
+                  ? { url, active: false, error: false, loading: true, proportions: null }
+                  : { url, active: false, error: false, loading: false, proportions: null }
+              );
+            }}
           />
 
           {yourImage.active && (
