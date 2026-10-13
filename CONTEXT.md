@@ -82,6 +82,11 @@ produces. `.claude/hooks/guard-write.sh` enforces that the lockfile is not hand-
 and not the other is silently `undefined` in the deployed docs site. Currently four:
 `PORT`, `NEXT_PUBLIC_DOCS_URL`, `NEXT_PUBLIC_IMAGE_PROXY_URL`, `NEXT_PUBLIC_IMGPROXY_URL`.
 
+The proxy reads `TRUSTED_ORIGINS` at runtime, so it belongs in neither list. It is a
+comma-separated list of origins (`http://localhost:3000`) that skip the SSRF address check
+in `apps/cache/src/upstream-guard.ts`. Everything else that resolves to loopback, private,
+or link-local space is refused, so local docs development needs its own origin listed there.
+
 ## Deployment
 
 `render.yaml` defines three services: the cache proxy (node), the docs site (node), and

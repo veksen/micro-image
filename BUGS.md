@@ -231,7 +231,7 @@ gated on [ADR 0011](docs/adr/0011-provider-selection.md), which is still `propos
 | 22  | upstream `content-type` echoed with no validation                   | `server.test.ts`                                            | **fixed** ([#10](https://github.com/veksen/micro-image/issues/10)) |
 | 23  | no thundering-herd protection                                       | `server.test.ts`                                            | **fixed** ([#18](https://github.com/veksen/micro-image/issues/18)) |
 | 24  | no `timeout` / `maxContentLength` / `maxBodyLength` on axios        | `server.test.ts`                                            | **fixed** ([#7](https://github.com/veksen/micro-image/issues/7))   |
-| 25  | SSRF — `?image=` accepts any URL                                    | `server.test.ts`                                            | yes                                                                |
+| 25  | SSRF — `?image=` accepts any URL                                    | `server.test.ts`, `upstream-guard.test.ts`                  | **fixed** ([#5](https://github.com/veksen/micro-image/issues/5))   |
 | 26  | sharp errors bubble up as unhandled 500s                            | `server.test.ts`                                            | **fixed** ([#7](https://github.com/veksen/micro-image/issues/7))   |
 | 27  | quality / format / blur advertised but silently dropped             | covered by 2, 3, 4                                          | **fixed** ([#9](https://github.com/veksen/micro-image/issues/9))   |
 | 28  | ipx bogus `image_` modifier                                         | `providers/ipx.test.ts`                                     | **fixed** ([#12](https://github.com/veksen/micro-image/issues/12)) |
