@@ -12,7 +12,7 @@ Before declaring done, verify:
 - Any security issues (injection, SSRF, auth bypass, data exposure)? The proxy fetches
   arbitrary remote URLs, so this is a live concern, not a checkbox — see `BUGS.md`.
 - Is the code readable to someone who didn't write it?
-- Names descriptive and consistent with the glossary in `CONTEXT.md`?
+- Names descriptive and consistent with `GLOSSARY.md`?
 - Any dead code, debugging artifacts, or abandoned TODOs?
 - Any unnecessary new dependencies?
 - Could this break existing functionality?

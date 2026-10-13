@@ -27,29 +27,7 @@ Adding a provider is the archetypal change in this repo — see
 
 ## Glossary
 
-Use these terms as defined here. When output names one of these concepts — an issue title, a
-test name, a proposal — use the term, not a synonym.
-
-- **`ImageMeta`** — the six-field contract (`src`, `width`, `height`, `srcset`,
-  `placeholder?`, `sizes?`) that every acquisition path produces and the component consumes.
-  Not "image data" or "image info".
-- **Provider** — a URL builder for one image proxy, under
-  `packages/micro-image-image/src/providers/`. Each exports `generateUrl`. `ipx`, `imgproxy`,
-  and `micro-image` are providers; the proxy in `apps/cache` is a _proxy_, not a provider.
-- **Proxy** — the server that resizes, compresses, and caches. Self-hosted. `apps/cache` is a
-  reference implementation of one.
-- **Core** — the framework-agnostic half of the planned build-time plugin: the `?micro`
-  loader, cache layer, `ImageMeta` codec, config resolution.
-- **Adapter** — a `@micro-image/plugin-*` package. Finds `<Image>` and rewrites it. Nothing
-  else. Not "plugin" on its own, which is ambiguous between the two.
-- **LQIP** — the inline low-quality placeholder carried in `ImageMeta.placeholder`. Encoding
-  is undecided (ADR-0002).
-- **srcset ladder** — the set of widths emitted in `srcset`, clamped to intrinsic width
-  (ADR-0003). Not "breakpoints", which are a CSS concept.
-- **Characterization test** — asserts what the code does _today_, tagged `[BUG-n]`. Keeps CI
-  green and catches regressions.
-- **Ledger test** — an `it.fails` test asserting what the code _should_ do. Passes while the
-  bug exists, fails when it is fixed. See `BUGS.md`.
+Domain terms live in `GLOSSARY.md`, in the format the `domain-modeling` skill reads and writes.
 
 ## Commands
 
