@@ -3,18 +3,9 @@ import React from "react";
 import cx from "classnames";
 
 function Link({ href, children }: React.PropsWithChildren<{ href: string }>) {
-  const { asPath, isReady } = useRouter();
-  const [isActive, setIsActive] = React.useState(false);
-
-  React.useEffect(() => {
-    // Check if the router fields are updated client-side
-    if (isReady) {
-      const linkPathname = new URL(href, location.href).pathname;
-      const activePathname = new URL(asPath, location.href).pathname;
-
-      setIsActive(linkPathname === activePathname);
-    }
-  }, [asPath, isReady, href]);
+  const { asPath } = useRouter();
+  // Both paths are root-relative, so any base resolves them; pathname drops query and hash.
+  const isActive = new URL(href, "http://n").pathname === new URL(asPath, "http://n").pathname;
 
   return (
     <a
