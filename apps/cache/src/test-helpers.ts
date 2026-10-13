@@ -446,6 +446,8 @@ export interface OriginRoute {
   body: Buffer | string;
   contentType?: string | null;
   status?: number;
+  /** Extra response headers, such as a redirect's `location`. */
+  headers?: Record<string, string>;
   /** Omit content-length and stream the body chunked. */
   chunked?: boolean;
   /** Artificial delay before responding, in ms. */
@@ -476,6 +478,9 @@ export async function startOrigin(routes: Record<string, OriginRoute>): Promise<
 
     const send = () => {
       res.statusCode = route.status ?? 200;
+      for (const [name, value] of Object.entries(route.headers ?? {})) {
+        res.setHeader(name, value);
+      }
       if (route.contentType !== null) {
         res.setHeader("content-type", route.contentType ?? "image/jpeg");
       }

@@ -9,6 +9,7 @@ import {
   fallbackMime,
   avifQuality,
   avifEffort,
+  MAX_REDIRECTS,
 } from "./server";
 import { clearCache } from "./cache";
 import {
@@ -24,23 +25,39 @@ import {
 } from "./test-helpers";
 import { frameCount } from "./is-animated";
 
-let app: FastifyInstance;
+let app: FastifyInstance | undefined;
 let origin: Origin | undefined;
 
 beforeEach(() => {
   clearCache();
-  app = buildServer({ logger: false });
 });
 
 afterEach(async () => {
-  await app.close();
+  await app?.close();
+  app = undefined;
   await origin?.close();
   origin = undefined;
 });
 
+/**
+ * The proxy refuses loopback unless the origin is trusted, and the local origin
+ * only has a port once a test starts it. So the app is built on first use,
+ * trusting whichever origin that test started.
+ */
+function server(): FastifyInstance {
+  app ??= buildServer({ logger: false, trustedOrigins: origin ? [origin.url] : [] });
+  return app;
+}
+
 /** Requests /cache for a path served by the local origin. */
 function get(query: Record<string, string>) {
-  return app.inject({ method: "GET", url: "/cache", query });
+  return server().inject({ method: "GET", url: "/cache", query });
+}
+
+/** Requests /cache from an app that trusts nothing, as a default deploy does. */
+function getUntrusted(query: Record<string, string>) {
+  app = buildServer({ logger: false, trustedOrigins: [] });
+  return get(query);
 }
 
 /**
@@ -122,7 +139,7 @@ describe("resolveResponseMime", () => {
 
 describe("GET / — health", () => {
   it("returns the hello payload", async () => {
-    const res = await app.inject({ method: "GET", url: "/" });
+    const res = await server().inject({ method: "GET", url: "/" });
 
     expect(res.statusCode).toBe(200);
     expect(res.json()).toEqual({ hello: "world" });
@@ -585,6 +602,8 @@ describe("GET /cache — error handling [BUG-26]", () => {
   });
 
   it("reports an unreachable origin as a bad gateway, not an internal error", async () => {
+    // trusted, so the address check lets it through to a port nothing listens on
+    app = buildServer({ logger: false, trustedOrigins: ["http://127.0.0.1:1"] });
     const res = await get({ image: "http://127.0.0.1:1/nope.jpg" });
 
     // failing to reach upstream is not a fault of this proxy
@@ -593,17 +612,143 @@ describe("GET /cache — error handling [BUG-26]", () => {
 });
 
 describe("GET /cache — SSRF [BUG-25]", () => {
-  it("fetches an arbitrary loopback address with no allowlist", async () => {
-    const secret = "INTERNAL-ONLY-PAYLOAD";
-    origin = await startOrigin({
+  const secret = "INTERNAL-ONLY-PAYLOAD";
+
+  it("refuses a loopback IP literal", async () => {
+    origin = await startOrigin({ "/internal": { body: secret, contentType: "text/plain" } });
+
+    const res = await getUntrusted({ image: `${origin.url}/internal` });
+
+    expect(res.statusCode).toBe(403);
+    expect(res.rawPayload.toString()).not.toContain(secret);
+    expect(origin.totalHits()).toBe(0);
+  });
+
+  it("refuses a hostname that resolves to loopback", async () => {
+    origin = await startOrigin({ "/internal": { body: secret, contentType: "text/plain" } });
+    const { port } = new URL(origin.url);
+
+    const res = await getUntrusted({ image: `http://localhost:${port}/internal` });
+
+    expect(res.statusCode).toBe(403);
+    // the resolved address is logged, never echoed
+    expect(res.json()).toEqual({
+      error: "image URL resolves to a destination that is not allowed",
+    });
+    expect(origin.totalHits()).toBe(0);
+  });
+
+  it("refuses the cloud metadata address before connecting", async () => {
+    const res = await getUntrusted({ image: "http://169.254.169.254/latest/meta-data/" });
+
+    expect(res.statusCode).toBe(403);
+    // the literal check's message, not the connect-time one
+    expect(res.json()).toEqual({ error: "169.254.169.254 is not an allowed destination" });
+  });
+
+  it.each([
+    ["IPv4-mapped IPv6", "http://[::ffff:127.0.0.1]/"],
+    ["IPv6 loopback", "http://[::1]/"],
+    ["hex shorthand", "http://0x7f.1/"],
+    ["decimal shorthand", "http://2130706433/"],
+    ["private range", "http://10.0.0.1/"],
+  ])("refuses a %s literal", async (_, image) => {
+    const res = await getUntrusted({ image });
+
+    expect(res.statusCode).toBe(403);
+  });
+
+  it.each([
+    ["file scheme", "file:///etc/passwd"],
+    ["data scheme", "data:image/png;base64,iVBORw0KGgo="],
+    ["relative path", "/etc/passwd"],
+    ["empty string", ""],
+  ])("refuses a %s with a 400", async (_, image) => {
+    const res = await getUntrusted({ image });
+
+    expect(res.statusCode).toBe(400);
+  });
+
+  it("refuses a request with no image at all", async () => {
+    const res = await getUntrusted({});
+
+    expect(res.statusCode).toBe(400);
+  });
+
+  it("refuses a redirect from a trusted origin into an untrusted one", async () => {
+    const internal = await startOrigin({
       "/internal": { body: secret, contentType: "text/plain" },
     });
+    origin = await startOrigin({
+      "/hop": { body: "", status: 302, headers: { location: `${internal.url}/internal` } },
+    });
 
-    const res = await get({ image: `${origin.url}/internal` });
+    const res = await get({ image: `${origin.url}/hop` }).finally(() => internal.close());
 
-    // ?image= accepts any URL; loopback and link-local are reachable
+    expect(res.statusCode).toBe(403);
+    expect(origin.hits["/hop"]).toBe(1);
+    expect(internal.totalHits()).toBe(0);
+  });
+
+  it("follows a relative redirect within a trusted origin", async () => {
+    const jpeg = await makeJpeg({ width: 100, height: 100, quality: 80 });
+    origin = await startOrigin({
+      "/old.jpg": { body: "", status: 301, headers: { location: "/new.jpg" } },
+      "/new.jpg": { body: jpeg, contentType: "image/jpeg" },
+    });
+
+    const res = await get({ image: `${origin.url}/old.jpg` });
+
     expect(res.statusCode).toBe(200);
-    expect(res.rawPayload.toString()).toContain(secret);
+    expect(res.headers["content-type"]).toBe("image/jpeg");
+  });
+
+  it("reports a redirect to a non-http scheme as the upstream's fault", async () => {
+    origin = await startOrigin({
+      "/hop": { body: "", status: 302, headers: { location: "file:///etc/passwd" } },
+    });
+
+    const res = await get({ image: `${origin.url}/hop` });
+
+    expect(res.statusCode).toBe(502);
+  });
+
+  it("applies one timeout to the whole redirect chain, not one per hop", async () => {
+    const jpeg = await makeJpeg({ width: 100, height: 100, quality: 80 });
+    origin = await startOrigin({
+      "/a": { body: "", status: 302, headers: { location: "/b" }, delayMs: 150 },
+      "/b": { body: "", status: 302, headers: { location: "/c.jpg" }, delayMs: 150 },
+      "/c.jpg": { body: jpeg, contentType: "image/jpeg", delayMs: 150 },
+    });
+
+    // every hop fits inside 250ms, the chain does not
+    app = buildServer({ logger: false, trustedOrigins: [origin.url], upstreamTimeoutMs: 250 });
+    const res = await get({ image: `${origin.url}/a` });
+
+    expect(res.statusCode).toBe(504);
+  });
+
+  it(`gives up after ${MAX_REDIRECTS} redirects`, async () => {
+    origin = await startOrigin({
+      "/loop": { body: "", status: 302, headers: { location: "/loop" } },
+    });
+
+    const res = await get({ image: `${origin.url}/loop` });
+
+    expect(res.statusCode).toBe(502);
+    expect(origin.hits["/loop"]).toBe(MAX_REDIRECTS + 1);
+  });
+
+  it("trusts an origin by scheme, host and port, not by host alone", async () => {
+    const neighbour = await startOrigin({
+      "/internal": { body: secret, contentType: "text/plain" },
+    });
+    origin = await startOrigin({ "/cat.jpg": { body: "x", contentType: "image/jpeg" } });
+
+    const res = await get({ image: `${neighbour.url}/internal` }).finally(() => neighbour.close());
+
+    expect(res.statusCode).toBe(403);
+    expect(neighbour.totalHits()).toBe(0);
   });
 });
 
@@ -614,13 +759,12 @@ describe("GET /cache — upstream limits [BUG-24]", () => {
       "/slow.jpg": { body: jpeg, contentType: "image/jpeg", delayMs: 150 },
     });
 
-    const slowApp = buildServer({ logger: false, upstreamTimeoutMs: 2_000 });
-    const res = await slowApp.inject({
-      method: "GET",
-      url: "/cache",
-      query: { image: `${origin.url}/slow.jpg` },
+    app = buildServer({
+      logger: false,
+      trustedOrigins: [origin.url],
+      upstreamTimeoutMs: 2_000,
     });
-    await slowApp.close();
+    const res = await get({ image: `${origin.url}/slow.jpg` });
 
     expect(res.statusCode).toBe(200);
   });
@@ -629,13 +773,12 @@ describe("GET /cache — upstream limits [BUG-24]", () => {
     const jpeg = await makeJpeg({ width: 800, height: 600, quality: 100 });
     origin = await startOrigin({ "/big.jpg": { body: jpeg, contentType: "image/jpeg" } });
 
-    const tinyApp = buildServer({ logger: false, maxUpstreamBytes: 1_024 });
-    const res = await tinyApp.inject({
-      method: "GET",
-      url: "/cache",
-      query: { image: `${origin.url}/big.jpg` },
+    app = buildServer({
+      logger: false,
+      trustedOrigins: [origin.url],
+      maxUpstreamBytes: 1_024,
     });
-    await tinyApp.close();
+    const res = await get({ image: `${origin.url}/big.jpg` });
 
     expect(jpeg.byteLength).toBeGreaterThan(1_024);
     expect(res.statusCode).toBe(502);
@@ -742,10 +885,10 @@ describe("bug ledger", () => {
     expect(res.statusCode).toBe(200);
   });
 
-  it.fails("BUG-25: loopback and link-local targets should be refused", async () => {
+  it("BUG-25: loopback and link-local targets should be refused", async () => {
     origin = await startOrigin({ "/internal": { body: "secret", contentType: "text/plain" } });
 
-    const res = await get({ image: `${origin.url}/internal` });
+    const res = await getUntrusted({ image: `${origin.url}/internal` });
 
     expect(res.statusCode).toBeGreaterThanOrEqual(400);
   });
@@ -758,13 +901,12 @@ describe("bug ledger", () => {
 
     // an explicit short timeout rather than the production default, so the test
     // asserts the mechanism without depending on what that default happens to be
-    const impatient = buildServer({ logger: false, upstreamTimeoutMs: 100 });
-    const res = await impatient.inject({
-      method: "GET",
-      url: "/cache",
-      query: { image: `${origin.url}/slow.jpg` },
+    app = buildServer({
+      logger: false,
+      trustedOrigins: [origin.url],
+      upstreamTimeoutMs: 100,
     });
-    await impatient.close();
+    const res = await get({ image: `${origin.url}/slow.jpg` });
 
     expect(res.statusCode).toBe(504);
   });

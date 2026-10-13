@@ -1,14 +1,15 @@
-import http from "http";
-import https from "https";
 import Fastify, { FastifyInstance, FastifyRequest } from "fastify";
 import axios from "axios";
 import sharp from "sharp";
 import { buildId, fromCache, toCache } from "./cache";
 import { isAnimated } from "./is-animated";
 import { coalesce } from "./coalesce";
-
-const httpAgent = new http.Agent({ keepAlive: true });
-const httpsAgent = new https.Agent({ keepAlive: true });
+import {
+  agentsFor,
+  parseTrustedOrigins,
+  readTrustedOrigins,
+  RefusedUpstreamError,
+} from "./upstream-guard";
 
 export interface CacheQuerystring {
   image: string;
@@ -281,26 +282,67 @@ export interface DownloadLimits {
   maxBytes?: number;
 }
 
-export async function downloadImage(url: string, limits: DownloadLimits = {}) {
-  const maxBytes =
-    limits.maxBytes ?? readPositiveEnv("UPSTREAM_MAX_BYTES", DEFAULT_MAX_UPSTREAM_BYTES);
+export interface DownloadOptions extends DownloadLimits {
+  /** Origins that skip the address check. */
+  trustedOrigins: ReadonlySet<string>;
+}
 
-  // responseType "arraybuffer" resolves to a Buffer under Node's adapter, but
-  // axios types `data` as `any` without this. Stating it here is what lets the
-  // route use the body directly: the previous Buffer.from(data, "binary") was
-  // a full copy of every payload, and "binary" is latin1, which would have
-  // corrupted the bytes had the input ever actually been a string.
-  return axios<Buffer>(url, {
-    responseType: "arraybuffer",
-    httpAgent,
-    httpsAgent,
-    timeout:
-      limits.timeoutMs ?? readPositiveEnv("UPSTREAM_TIMEOUT_MS", DEFAULT_UPSTREAM_TIMEOUT_MS),
-    // axios tracks the running total and destroys the stream once it is passed,
-    // so an oversized body is refused rather than fully buffered first.
-    maxContentLength: maxBytes,
-    maxBodyLength: maxBytes,
-  });
+export const MAX_REDIRECTS = 5;
+
+const redirectStatuses = new Set([301, 302, 303, 307, 308]);
+
+export async function downloadImage(url: string, options: DownloadOptions) {
+  const maxBytes =
+    options.maxBytes ?? readPositiveEnv("UPSTREAM_MAX_BYTES", DEFAULT_MAX_UPSTREAM_BYTES);
+  const timeout =
+    options.timeoutMs ?? readPositiveEnv("UPSTREAM_TIMEOUT_MS", DEFAULT_UPSTREAM_TIMEOUT_MS);
+
+  // One deadline for the whole chain, so redirects cannot stretch the limit.
+  // A spent deadline leaves a 1ms timeout, which axios reports as one.
+  const deadline = Date.now() + timeout;
+
+  let target = url;
+
+  for (let redirects = 0; ; redirects++) {
+    // responseType "arraybuffer" resolves to a Buffer under Node's adapter, but
+    // axios types `data` as `any` without this. Stating it here is what lets the
+    // route use the body directly: the previous Buffer.from(data, "binary") was
+    // a full copy of every payload, and "binary" is latin1, which would have
+    // corrupted the bytes had the input ever actually been a string.
+    const response = await axios<Buffer>(target, {
+      ...agentsFor(target, options.trustedOrigins),
+      responseType: "arraybuffer",
+      timeout: Math.max(1, deadline - Date.now()),
+      // axios tracks the running total and destroys the stream once it is passed,
+      // so an oversized body is refused rather than fully buffered first.
+      maxContentLength: maxBytes,
+      maxBodyLength: maxBytes,
+      // Redirects are followed by this loop rather than by axios, so every hop
+      // goes back through agentsFor. A redirect is the cheapest way past a
+      // check that only looked at the first URL.
+      maxRedirects: 0,
+      // A forward proxy would resolve the hostname itself, out of reach of the
+      // address check, so HTTP(S)_PROXY from the environment is ignored.
+      proxy: false,
+      validateStatus: (status) => (status >= 200 && status < 300) || redirectStatuses.has(status),
+    });
+
+    if (!redirectStatuses.has(response.status)) {
+      return response;
+    }
+
+    const location = response.headers.location as string | undefined;
+
+    if (!location) {
+      throw new Error("redirect without a location");
+    }
+
+    if (redirects === MAX_REDIRECTS) {
+      throw new Error(`more than ${MAX_REDIRECTS} redirects`);
+    }
+
+    target = new URL(location, target).href;
+  }
 }
 
 /**
@@ -308,6 +350,16 @@ export async function downloadImage(url: string, limits: DownloadLimits = {}) {
  * read as a 500. A timeout is reported as one, everything else as a bad gateway.
  */
 export function upstreamErrorStatus(error: unknown): number {
+  // A refusal raised inside the socket's lookup reaches here wrapped by axios.
+  const refusal = axios.isAxiosError(error) ? error.cause : error;
+
+  // Only a blocked address is the caller's fault here. The route has already
+  // refused a malformed request URL with a 400, so a malformed URL that reaches
+  // this point came from an upstream redirect, which makes it a bad gateway.
+  if (refusal instanceof RefusedUpstreamError && refusal.status === 403) {
+    return 403;
+  }
+
   const code = axios.isAxiosError(error) ? error.code : undefined;
 
   return code === "ECONNABORTED" || code === "ETIMEDOUT" ? 504 : 502;
@@ -318,6 +370,11 @@ export interface BuildServerOptions {
   /** Overrides the env-configured limits. Mainly so tests can use a short timeout. */
   upstreamTimeoutMs?: number;
   maxUpstreamBytes?: number;
+  /**
+   * Origins that skip the address check, such as an image host on a private
+   * network. Overrides `TRUSTED_ORIGINS`. See `parseTrustedOrigins`.
+   */
+  trustedOrigins?: readonly string[];
 }
 
 /**
@@ -332,6 +389,12 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
   const fastify = Fastify({
     logger: options.logger ?? true,
   });
+
+  // Parsed once, so a malformed TRUSTED_ORIGINS fails the boot rather than
+  // every request.
+  const trustedOrigins = options.trustedOrigins
+    ? parseTrustedOrigins(options.trustedOrigins)
+    : readTrustedOrigins();
 
   fastify.get("/", async (request, reply) => {
     reply.type("application/json").code(200);
@@ -349,6 +412,20 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
         error: `unsupported format "${requested.format}"`,
         supported: [...Object.keys(formatMimes), passthroughFormat],
       };
+    }
+
+    // Refuse a URL that is malformed or names a blocked address before the
+    // cache is consulted, so it costs nothing. Hostnames are checked again at
+    // connect time, and every redirect hop is checked in downloadImage.
+    try {
+      agentsFor(request.query.image, trustedOrigins);
+    } catch (error) {
+      if (!(error instanceof RefusedUpstreamError)) {
+        throw error;
+      }
+
+      reply.code(error.status);
+      return { error: error.message };
     }
 
     const id = buildId(request.query.image, requested);
@@ -380,6 +457,7 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
         const image = await downloadImage(request.query.image, {
           timeoutMs: options.upstreamTimeoutMs,
           maxBytes: options.maxUpstreamBytes,
+          trustedOrigins,
         });
 
         // axios types response header values as `AxiosHeaderValue | undefined`.
@@ -477,7 +555,15 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
       );
 
       reply.code(status);
-      return { error: "could not fetch the image from upstream" };
+
+      // The resolved address stays in the log. Echoing it would turn the proxy
+      // into a resolver for internal hostnames.
+      return {
+        error:
+          status === 403
+            ? "image URL resolves to a destination that is not allowed"
+            : "could not fetch the image from upstream",
+      };
     }
 
     return send(result.contentType, result.body);
