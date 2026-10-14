@@ -19,11 +19,11 @@ from the proxy `?meta` endpoint at runtime.
 That single rule is what lets one component serve three different acquisition paths without
 branching on which one produced its data:
 
-| Path              | Who fills `ImageMeta`                       | Cost                   |
-| ----------------- | ------------------------------------------- | ---------------------- |
-| Build-time static | `unplugin` + `?micro` loader, at build      | zero runtime           |
-| Runtime dynamic   | proxy `?meta` endpoint                      | one small JSON request |
-| No proxy          | `sizes="auto"` + native `srcset`, at layout | zero, but no LQIP      |
+| Path              | Who fills `ImageMeta`                      | Cost                   |
+| ----------------- | ------------------------------------------ | ---------------------- |
+| Build-time static | `unplugin` + `?micro` loader, at build     | zero runtime           |
+| Runtime dynamic   | proxy `?meta` endpoint                     | one small JSON request |
+| No proxy          | native `srcset` + `sizes` (`auto` if lazy) | zero, but no LQIP      |
 
 If a path starts producing a differently-shaped object, the component has to learn where its
 props came from — and at that point every future framework adapter has to learn it too. That
@@ -35,9 +35,14 @@ is the failure mode this contract exists to prevent.
   phantom `2400w` for a 900px image asks the browser to download an upscale.
 - **`width`/`height` are intrinsic pixels**, not rendered size. They exist to reserve layout
   space and prevent CLS, via `aspect-ratio` — not to select a variant.
-- **`sizes` is an escape hatch, not the mechanism.** Container-width selection comes from
-  `sizes="auto"`. An explicit `sizes` is only for above-the-fold images that opt out via
-  `priority`, where the preload scanner has to act before layout.
+- **`sizes` ships in the first paint, and the observer refines it.** The build knows the
+  image; a `ResizeObserver` knows the container. A lazy image uses `sizes="auto"`, which picks
+  from the container width after layout with no guess. An eager (above-the-fold) image cannot
+  wait for layout, so the build bakes an initial `sizes` and the observer corrects it.
+  Browsers upgrade a candidate on resize but never downgrade, so a bake that is too large
+  costs bytes the observer cannot take back. `sizes="auto"` alone is never the mechanism for
+  an eager image: it requires `loading="lazy"`. See `VISION.md` § How container-width
+  selection works.
 - **`placeholder` is optional and always inline.** If producing it costs a network request at
   runtime, don't produce it — the round trip is worse than no placeholder.
 
@@ -58,8 +63,11 @@ of settling it implicitly in code:
 
 ## Today's gap
 
-The component does not implement this yet. It currently generates a 20-entry srcset
-uncapped at intrinsic width, measures with a `ResizeObserver` after mount, fetches a blurred
-placeholder over the network, and calls `useImage` on a URL whose bytes are discarded. Those
-are BUG-1, BUG-2, and BUG-10 in `BUGS.md`, and vision milestone 1 is the work of closing them.
-Read the ledger tests before changing this code — they encode the target behavior.
+The component does not implement all of this yet. It generates its own srcset (100px steps,
+capped at intrinsic width and at 1900w) rather than consuming one, and fetches a blurred placeholder over the network instead of inlining it
+(BUG-2). It has no build-time `sizes`: a lazy image uses `sizes="auto"`, and an eager one
+falls back to the viewport capped at intrinsic width unless the caller passes `sizes`. Read the
+ledger tests before changing this code — they encode the target behavior.
+
+BUG-10 is closed: `srcset` and `sizes` ship in the first paint. BUG-1 is closed. The `useImage` hook that called a URL whose bytes were discarded is gone, and
+the rendered element's own `onError` reports failure.

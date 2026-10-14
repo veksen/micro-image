@@ -17,9 +17,9 @@ next to this one — read the one that matches what you're changing.
 ## The short version
 
 **One shape, three paths.** Build-time (`unplugin` + `?micro` loader), runtime-dynamic (proxy
-`?meta` endpoint), and no-proxy (`sizes="auto"` + native `srcset`) all produce the same
-`ImageMeta`. The component takes every field as an optional prop: present → use it, missing →
-fetch it. That invariant is what lets one component serve all three. A change that makes one
+`?meta` endpoint), and no-proxy (native `srcset` + `sizes`, `auto` for lazy images) all produce
+the same `ImageMeta`. The component takes every field as an optional prop: present → use it,
+missing → fetch it. That invariant is what lets one component serve all three. A change that makes one
 path produce a different shape is the failure mode that ends the project.
 
 **Adapters do one thing.** A `@micro-image/plugin-*` package finds `<Image>` elements whose

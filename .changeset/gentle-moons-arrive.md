@@ -2,25 +2,24 @@
 "@micro-image/image": minor
 ---
 
-Emit `srcset` and `sizes` on the first paint, so the browser's preload scanner can start the
-real image.
+Emit `srcset` and `sizes` on the first paint, so the browser can pick and start the image
+without waiting for JavaScript.
 
-Both attributes used to be written imperatively from inside a `ResizeObserver` callback, so
-nothing but the blurred placeholder existed until HTML parsed, React hydrated, the effect ran
-and the observer fired. `<img>` now receives `srcSet` and `sizes` as React props, which also
-ends the second half of the defect: a re-render touching the element wiped the observer's DOM
-writes and the observer had to fire again to restore them.
+Both attributes used to be written from a `ResizeObserver` callback after mount, so the first
+paint carried only the blurred placeholder. `<img>` now receives `srcSet` and `sizes` as props,
+and the observer is gone.
 
-`sizes` defaults to `auto, 100vw` and the image now loads lazily, because `sizes="auto"` — the
-browser choosing a candidate from the element's own laid-out width, with no JavaScript — is
-only honoured on a lazily loaded image. Browsers without support for the keyword skip it and
-read the `100vw` bound, then narrow to the measured container width when the observer reports
-it.
+Images now load lazily by default with `sizes="auto"`, which lets the browser pick a candidate
+from the element's own laid-out width. Browsers without `auto` read the fallback after it: the
+viewport, capped at the image's intrinsic width.
 
-Two new optional props: `sizes` overrides the computed value and switches the observer off,
-and `loading` takes `eager` for an image above the fold, which must not be deferred.
+Two new optional props. `loading="eager"` is for an image above the fold. Pass `sizes` with it:
+an eager image without one falls back to the viewport, which overfetches whenever the image is
+narrower than the viewport.
 
-One visible change: the blurred placeholder no longer renders. `srcset` supersedes `src`, so a
-browser that understands it never requests the placeholder URL — one fewer round trip per
-image, and the direction `VISION.md` already sets. `src` still carries the placeholder for
-browsers without `srcset`.
+The blurred placeholder no longer renders in browsers that support `srcset`, because `srcset`
+supersedes `src`. `src` still carries it for browsers without `srcset`.
+
+`srcset` now stops at the image's intrinsic width (still at most 1900w). A dense display used
+to request wider candidates the proxy could not fill, each one a separate encode and cache
+entry.

@@ -13,8 +13,7 @@ survive being checked. It is recorded below so the same reasoning is not repeate
 
 Every path that produces `ImageMeta` decides which widths go in `srcset`. Today
 `generateSrcSet` in `packages/micro-image-image/src/image.component.tsx` emits
-`Array.from({ length: 20 }).slice(1).map(i => i * 100)` — 19 entries from 100w to 1900w, the
-same for every image, with no clamp to intrinsic width.
+100px steps up to 1900w, the same for every image, clamped to the intrinsic width since #71.
 
 ## Why the earlier proposal was withdrawn
 
@@ -73,9 +72,9 @@ Ratifying this ADR needs both halves, and only the first is a benchmark:
 Three defects in the current implementation are true under any ladder, and should be fixed
 without waiting for ratification:
 
-- **No clamp to intrinsic width.** A 900px source advertises up to 1900w, so the browser can
-  request an upscale and the proxy will generate and cache it. Clamping needs the intrinsic
-  width, which arrives with the `?meta` endpoint (roadmap step 3).
+- **No clamp to intrinsic width.** Fixed in #71. A 900px source advertised up to 1900w, so a
+  dense display requested widths the proxy could not fill, each a separate encode and cache
+  entry. The component now clamps to its `width` prop, which is the intrinsic width.
 - **The ceiling is 1900w.** A 2× display with a 1200px container needs 2400 and is offered
   nothing.
 - **The component should not own the ladder at all.** `srcset` is a field on `ImageMeta`; the

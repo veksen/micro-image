@@ -27,29 +27,7 @@ Adding a provider is the archetypal change in this repo — see
 
 ## Glossary
 
-Use these terms as defined here. When output names one of these concepts — an issue title, a
-test name, a proposal — use the term, not a synonym.
-
-- **`ImageMeta`** — the six-field contract (`src`, `width`, `height`, `srcset`,
-  `placeholder?`, `sizes?`) that every acquisition path produces and the component consumes.
-  Not "image data" or "image info".
-- **Provider** — a URL builder for one image proxy, under
-  `packages/micro-image-image/src/providers/`. Each exports `generateUrl`. `ipx`, `imgproxy`,
-  and `micro-image` are providers; the proxy in `apps/cache` is a _proxy_, not a provider.
-- **Proxy** — the server that resizes, compresses, and caches. Self-hosted. `apps/cache` is a
-  reference implementation of one.
-- **Core** — the framework-agnostic half of the planned build-time plugin: the `?micro`
-  loader, cache layer, `ImageMeta` codec, config resolution.
-- **Adapter** — a `@micro-image/plugin-*` package. Finds `<Image>` and rewrites it. Nothing
-  else. Not "plugin" on its own, which is ambiguous between the two.
-- **LQIP** — the inline low-quality placeholder carried in `ImageMeta.placeholder`. Encoding
-  is undecided (ADR-0002).
-- **srcset ladder** — the set of widths emitted in `srcset`, clamped to intrinsic width
-  (ADR-0003). Not "breakpoints", which are a CSS concept.
-- **Characterization test** — asserts what the code does _today_, tagged `[BUG-n]`. Keeps CI
-  green and catches regressions.
-- **Ledger test** — an `it.fails` test asserting what the code _should_ do. Passes while the
-  bug exists, fails when it is fixed. See `BUGS.md`.
+Domain terms live in `GLOSSARY.md`, in the format the `domain-modeling` skill reads and writes.
 
 ## Commands
 
@@ -77,7 +55,7 @@ Every dependency is pinned to an explicit range. Nothing resolves `latest`.
 - **TypeScript** 7.0.2, the native port. It removed `baseUrl` and `moduleResolution: node10`
   and requires an explicit `rootDir` when emitting. Next.js cannot use its compiler API, so
   `apps/docs` sets `experimental.useTypeScriptCli`.
-- **oxlint** 1.76 (`.oxlintrc.json`) and **oxfmt** 0.61 (`.oxfmtrc.json`), replacing eslint
+- **oxlint** 1.88 (`.oxlintrc.json`) and **oxfmt** 0.73 (`.oxfmtrc.json`), replacing eslint
   and prettier. `turbo/no-undeclared-env-vars` has no oxlint equivalent and is simply gone;
   `turbo.json` `globalEnv` remains the only declaration of those vars.
 - **Tailwind** v4 in `apps/docs`, configured CSS-first in `src/globals.css`. There is no
@@ -151,8 +129,9 @@ ADR `0010-unimprovable-formats` records that.
 
 From `VISION.md`. Each step is independently useful and does not strictly require the next.
 
-1. **Fix the component runtime** — `sizes="auto"`, drop dead fetches, capped srcset,
-   aspect-ratio via CSS. No server changes.
+1. **Fix the component runtime** — `srcset` and `sizes` in the first paint (`auto` for lazy
+   images, a baked value the observer refines for eager ones), drop dead fetches, capped
+   srcset, aspect-ratio via CSS. No server changes.
 2. **Proxy quick wins** — `Cache-Control` on hits, request coalescing, `Accept`-based
    AVIF/WebP, and format in the cache key.
 3. **Proxy `?meta` endpoint** — retires `getImageProportions`, which downloads a whole image
