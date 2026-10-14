@@ -63,11 +63,11 @@ of settling it implicitly in code:
 
 ## Today's gap
 
-The component does not implement this yet. It currently generates a 19-entry srcset uncapped
-at intrinsic width, attaches it with a `ResizeObserver` after mount rather than on the first
-paint, and fetches a blurred placeholder over the network instead of inlining it. Those are
-BUG-2 and BUG-10 in `BUGS.md`, and vision milestone 1 is the work of closing them. Read the
+The component does not implement all of this yet. It generates its own srcset (100px steps,
+capped at intrinsic width and at 1900w) rather than consuming one, and fetches a blurred placeholder over the network instead of inlining it
+(BUG-2). It has no build-time `sizes`: a lazy image uses `sizes="auto"`, and an eager one
+falls back to the viewport capped at intrinsic width unless the caller passes `sizes`. Read the
 ledger tests before changing this code — they encode the target behavior.
 
-BUG-1 is closed. The `useImage` hook that called a URL whose bytes were discarded is gone, and
+BUG-10 is closed: `srcset` and `sizes` ship in the first paint. BUG-1 is closed. The `useImage` hook that called a URL whose bytes were discarded is gone, and
 the rendered element's own `onError` reports failure.

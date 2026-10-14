@@ -1,12 +1,39 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useMemo, useState } from "react";
 import { useImageCacheConfig } from "./image-cache-provider";
 import { IProviderOptions } from "./providers/base";
 
 /** Used when the caller does not ask for a quality of its own. */
 const defaultQuality = 75;
 
+/**
+ * `auto` sizes a lazy image from its own laid-out width. An eager image, or a
+ * browser without `auto`, skips the keyword and reads the fallback: the
+ * viewport capped at the intrinsic width. That fallback is never too small, and
+ * too large whenever the image is narrower than the viewport, so an eager image
+ * should pass its own `sizes`.
+ */
+const defaultSizes = (intrinsicWidth: number) =>
+  `auto, (max-width: ${intrinsicWidth}px) 100vw, ${intrinsicWidth}px`;
+
+/** The ladder steps by 100px and stops here, whatever the source width. */
+const ladderStep = 100;
+const ladderCeiling = 1900;
+
+/**
+ * Candidate widths, closed by the intrinsic width. A wider candidate adds no
+ * pixels, only another encode and cache entry in the proxy.
+ */
+const ladderWidths = (intrinsicWidth: number) => {
+  const top = Math.min(intrinsicWidth, ladderCeiling);
+  const widths: number[] = [];
+  for (let width = ladderStep; width < top; width += ladderStep) widths.push(width);
+  widths.push(top);
+  return widths;
+};
+
 interface GenerateSrcSetOptions {
   baseSrc: string;
+  intrinsicWidth: number;
   cacheProxyUrl: string;
   generator: (options: IProviderOptions) => string;
   defaultGeneratorOptions?: Partial<IProviderOptions>;
@@ -14,15 +41,13 @@ interface GenerateSrcSetOptions {
 
 const generateSrcSet = ({
   baseSrc,
+  intrinsicWidth,
   cacheProxyUrl,
   generator,
   defaultGeneratorOptions,
 }: GenerateSrcSetOptions) => {
-  return Array.from({ length: 20 })
-    .map((_, index) => index)
-    .slice(1)
-    .map((index) => {
-      const width = index * 100;
+  return ladderWidths(intrinsicWidth)
+    .map((width) => {
       const url = generator({
         // `quality` leads the spread so a caller's own value wins. It used to
         // trail it, which meant generatorOptions.quality was accepted and then
@@ -45,15 +70,23 @@ export interface IImageProps<GeneratorOptions extends IProviderOptions> {
   alt?: string;
   objectFit?: "none" | "cover" | "contain";
   generatorOptions?: Partial<GeneratorOptions>;
+  /**
+   * Overrides the computed `sizes`. Pass it for an eager image: the layout is
+   * the one thing the component cannot know before the first paint.
+   */
+  sizes?: string;
+  /**
+   * Defaults to `lazy`, which lets the browser size the image from its own
+   * container with `sizes="auto"`. Pass `eager` for an image above the fold,
+   * together with a `sizes` that matches its layout.
+   */
+  loading?: "lazy" | "eager";
 }
 
 function Image<GeneratorOptions extends IProviderOptions = IProviderOptions>(
   props: IImageProps<GeneratorOptions>
 ): React.JSX.Element {
   const config = useImageCacheConfig();
-
-  const imageRef = useRef<HTMLImageElement | null>(null);
-  const observerRef = useRef<ResizeObserver | null>(null);
 
   /**
    * The src that failed to load, rather than a boolean.
@@ -77,6 +110,7 @@ function Image<GeneratorOptions extends IProviderOptions = IProviderOptions>(
   const srcSet = useMemo(() => {
     return generateSrcSet({
       baseSrc: props.src,
+      intrinsicWidth: props.width,
       cacheProxyUrl: config.cacheProxyUrl,
       generator: config.generateUrl,
       defaultGeneratorOptions: {
@@ -86,42 +120,17 @@ function Image<GeneratorOptions extends IProviderOptions = IProviderOptions>(
     });
   }, [
     props.src,
+    props.width,
     props.generatorOptions,
     config.cacheProxyUrl,
     config.generateUrl,
     config.defaultGeneratorOptions,
   ]);
 
-  useEffect(() => {
-    if (!imageRef.current) return;
-    if (typeof window === "undefined") return;
+  const loading = props.loading ?? "lazy";
 
-    observerRef.current = new ResizeObserver(([entry]: ResizeObserverEntry[]) => {
-      requestAnimationFrame(() => {
-        const { width } = entry.contentRect;
-        if (!imageRef.current) return;
-
-        const imgEl = imageRef.current;
-        const widthToRender = Math.ceil(Math.floor(width) / 100) * 100;
-
-        if (imgEl.sizes !== `${widthToRender}px`) {
-          imgEl.sizes = `${widthToRender}px`;
-        }
-
-        if (imgEl.srcset !== srcSet) {
-          imgEl.srcset = srcSet;
-        }
-      });
-    });
-
-    observerRef.current.observe(imageRef.current);
-
-    return () => {
-      observerRef.current?.disconnect();
-    };
-    // `failed` unmounts and remounts the element, so the observer has to be
-    // pointed at the new node rather than left watching the detached one
-  }, [srcSet, failed]);
+  // Either way the first paint carries a real `sizes`, so no JavaScript gates the fetch.
+  const sizes = props.sizes ?? defaultSizes(props.width);
 
   return (
     <div
@@ -147,8 +156,10 @@ function Image<GeneratorOptions extends IProviderOptions = IProviderOptions>(
         {!failed && (
           <img
             src={blurredImageSrc}
+            srcSet={srcSet}
+            sizes={sizes}
+            loading={loading}
             onError={() => setFailedSrc(props.src)}
-            ref={imageRef}
             style={{
               width: "100%",
               height: "100%",

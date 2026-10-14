@@ -112,6 +112,18 @@ function StrategyImage({ strategy, layout, origin, proxy, index }: BenchProps & 
       />
     );
   }
+  if (strategy === "pr71" || strategy === "pr71+sizes") {
+    return (
+      <MicroImage
+        src={`${origin}${path}`}
+        width={fixture.width}
+        height={fixture.height}
+        objectFit="cover"
+        loading={lazy ? "lazy" : "eager"}
+        sizes={strategy === "pr71+sizes" && !lazy ? layout.exactSizes : undefined}
+      />
+    );
+  }
   if (strategy === "next-image") {
     return (
       <NextImage
