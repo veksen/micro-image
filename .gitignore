@@ -25,3 +25,5 @@ apps/cache/benchmark/summary.md
 coverage
 coverage-baseline
 coverage-comment.md
+apps/docs/bench/results/
+apps/docs/public/bench/
