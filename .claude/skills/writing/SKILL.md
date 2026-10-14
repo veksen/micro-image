@@ -73,7 +73,7 @@ Structural tells:
 - **Empty intensifiers** — very, truly, incredibly, deeply.
 - **Hedging filler** — see rule 3.
 - **Self-narrating prose** — don't narrate the reader's confusion or the doc's own reasoning ("this is where it looks broken", "the two halves"). State what's true and what to do.
-- **Coined nouns** — don't invent a capitalized concept ("Capture", "the Provenance layer") and lean on it; use words the reader already has. `ImageMeta` is a real type in this repo, not a coinage; check `CONTEXT.md` § Glossary before inventing a term.
+- **Coined nouns** — don't invent a capitalized concept ("Capture", "the Provenance layer") and lean on it; use words the reader already has. `ImageMeta` is a real type in this repo, not a coinage; check `GLOSSARY.md` before inventing a term.
 
 ## Per surface
 

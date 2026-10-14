@@ -1,5 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
-import useImage from "./use-image.hook";
+import React, { useMemo, useState } from "react";
 import { useImageCacheConfig } from "./image-cache-provider";
 import { IProviderOptions } from "./providers/base";
 
@@ -7,26 +6,34 @@ import { IProviderOptions } from "./providers/base";
 const defaultQuality = 75;
 
 /**
- * `sizes="auto"` tells the browser to pick the candidate from the element's own
- * post-layout width — container-width selection with no JavaScript at all,
- * which is the north star. Two constraints shape the value below:
- *
- * - it is only honoured on a lazily loaded image, because the browser needs
- *   layout to have happened before the fetch begins;
- * - browsers that do not support it (Safari, at the time of writing) skip the
- *   keyword and read the rest of the list, hence the `100vw` after it.
- *
- * `100vw` is an upper bound rather than a guess: the wrapper is `width: 100%`,
- * so the image can never be wider than the viewport. Overshooting costs bytes;
- * undershooting would render a blurry image, which is not recoverable.
+ * `auto` sizes a lazy image from its own laid-out width. An eager image, or a
+ * browser without `auto`, skips the keyword and reads the fallback: the
+ * viewport capped at the intrinsic width. That fallback is never too small, and
+ * too large whenever the image is narrower than the viewport, so an eager image
+ * should pass its own `sizes`.
  */
-const lazySizes = "auto, 100vw";
+const defaultSizes = (intrinsicWidth: number) =>
+  `auto, (max-width: ${intrinsicWidth}px) 100vw, ${intrinsicWidth}px`;
 
-/** An eagerly loaded image cannot use `auto`, so it gets the bound alone. */
-const eagerSizes = "100vw";
+/** The ladder steps by 100px and stops here, whatever the source width. */
+const ladderStep = 100;
+const ladderCeiling = 1900;
+
+/**
+ * Candidate widths, closed by the intrinsic width. A wider candidate adds no
+ * pixels, only another encode and cache entry in the proxy.
+ */
+const ladderWidths = (intrinsicWidth: number) => {
+  const top = Math.min(intrinsicWidth, ladderCeiling);
+  const widths: number[] = [];
+  for (let width = ladderStep; width < top; width += ladderStep) widths.push(width);
+  widths.push(top);
+  return widths;
+};
 
 interface GenerateSrcSetOptions {
   baseSrc: string;
+  intrinsicWidth: number;
   cacheProxyUrl: string;
   generator: (options: IProviderOptions) => string;
   defaultGeneratorOptions?: Partial<IProviderOptions>;
@@ -34,16 +41,17 @@ interface GenerateSrcSetOptions {
 
 const generateSrcSet = ({
   baseSrc,
+  intrinsicWidth,
   cacheProxyUrl,
   generator,
   defaultGeneratorOptions,
 }: GenerateSrcSetOptions) => {
-  return Array.from({ length: 20 })
-    .map((_, index) => index)
-    .slice(1)
-    .map((index) => {
-      const width = index * 100;
+  return ladderWidths(intrinsicWidth)
+    .map((width) => {
       const url = generator({
+        // `quality` leads the spread so a caller's own value wins. It used to
+        // trail it, which meant generatorOptions.quality was accepted and then
+        // silently overwritten with the default.
         quality: defaultQuality,
         ...defaultGeneratorOptions,
         url: cacheProxyUrl,
@@ -63,13 +71,14 @@ export interface IImageProps<GeneratorOptions extends IProviderOptions> {
   objectFit?: "none" | "cover" | "contain";
   generatorOptions?: Partial<GeneratorOptions>;
   /**
-   * Overrides the computed `sizes`. Supplying it also switches off the resize
-   * observer: a caller who knows its layout does not need us to measure it.
+   * Overrides the computed `sizes`. Pass it for an eager image: the layout is
+   * the one thing the component cannot know before the first paint.
    */
   sizes?: string;
   /**
-   * Defaults to `lazy`, which is what makes `sizes="auto"` legal. Pass `eager`
-   * for an image above the fold — an LCP candidate must not be deferred.
+   * Defaults to `lazy`, which lets the browser size the image from its own
+   * container with `sizes="auto"`. Pass `eager` for an image above the fold,
+   * together with a `sizes` that matches its layout.
    */
   loading?: "lazy" | "eager";
 }
@@ -79,29 +88,15 @@ function Image<GeneratorOptions extends IProviderOptions = IProviderOptions>(
 ): React.JSX.Element {
   const config = useImageCacheConfig();
 
-  const imageRef = useRef<HTMLImageElement | null>(null);
-
   /**
-   * The container width once layout has run, as a `sizes` value.
+   * The src that failed to load, rather than a boolean.
    *
-   * This is a refinement, not the mechanism. A browser supporting
-   * `sizes="auto"` has already made the same choice without us; this exists so
-   * that one which does not still narrows from the `100vw` bound to the real
-   * container. It is React state rather than a direct DOM write, because the
-   * observer used to mutate `imgEl.srcset`/`imgEl.sizes` behind React's back
-   * and any re-render touching the `<img>` wiped both.
+   * Comparing it against the current src is what makes recovery automatic: a
+   * caller pointing the component at a different image gets a fresh attempt,
+   * where a boolean would have latched and rendered nothing forever.
    */
-  const [measuredSizes, setMeasuredSizes] = useState<string | null>(null);
-
-  // `quality` leads the spread so a caller's own value wins. It used to trail
-  // it, which meant generatorOptions.quality was accepted and then overwritten.
-  const imageSrc = config.generateUrl({
-    quality: defaultQuality,
-    ...config.defaultGeneratorOptions,
-    ...props.generatorOptions,
-    url: config.cacheProxyUrl,
-    src: props.src,
-  });
+  const [failedSrc, setFailedSrc] = useState<string | null>(null);
+  const failed = failedSrc === props.src;
 
   const blurredImageSrc = config.generateUrl({
     ...config.defaultGeneratorOptions,
@@ -112,11 +107,10 @@ function Image<GeneratorOptions extends IProviderOptions = IProviderOptions>(
     blur: 5,
   });
 
-  const { error } = useImage(imageSrc);
-
   const srcSet = useMemo(() => {
     return generateSrcSet({
       baseSrc: props.src,
+      intrinsicWidth: props.width,
       cacheProxyUrl: config.cacheProxyUrl,
       generator: config.generateUrl,
       defaultGeneratorOptions: {
@@ -126,6 +120,7 @@ function Image<GeneratorOptions extends IProviderOptions = IProviderOptions>(
     });
   }, [
     props.src,
+    props.width,
     props.generatorOptions,
     config.cacheProxyUrl,
     config.generateUrl,
@@ -134,33 +129,8 @@ function Image<GeneratorOptions extends IProviderOptions = IProviderOptions>(
 
   const loading = props.loading ?? "lazy";
 
-  /**
-   * Resolved in precedence order: what the caller asked for, then what layout
-   * told us, then the static bound. Every one of them is a real value, so the
-   * first paint carries a `sizes` — which is the point of the fix.
-   */
-  const sizes = props.sizes ?? measuredSizes ?? (loading === "lazy" ? lazySizes : eagerSizes);
-
-  useEffect(() => {
-    // a caller who passed `sizes` owns it; measuring would only fight them
-    if (props.sizes) return;
-    if (!imageRef.current) return;
-    if (typeof ResizeObserver === "undefined") return;
-
-    const observer = new ResizeObserver(([entry]: ResizeObserverEntry[]) => {
-      const { width } = entry.contentRect;
-      // an unlaid-out element reports 0, which would round up to a 100w image
-      if (width <= 0) return;
-
-      setMeasuredSizes(`${Math.ceil(Math.floor(width) / 100) * 100}px`);
-    });
-
-    observer.observe(imageRef.current);
-
-    return () => {
-      observer.disconnect();
-    };
-  }, [props.sizes]);
+  // Either way the first paint carries a real `sizes`, so no JavaScript gates the fetch.
+  const sizes = props.sizes ?? defaultSizes(props.width);
 
   return (
     <div
@@ -183,13 +153,13 @@ function Image<GeneratorOptions extends IProviderOptions = IProviderOptions>(
           left: 0,
         }}
       >
-        {!error && (
+        {!failed && (
           <img
             src={blurredImageSrc}
             srcSet={srcSet}
             sizes={sizes}
             loading={loading}
-            ref={imageRef}
+            onError={() => setFailedSrc(props.src)}
             style={{
               width: "100%",
               height: "100%",

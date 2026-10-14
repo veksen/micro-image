@@ -83,11 +83,12 @@ The five canonical roles, each label string equal to its name. See
 
 ### Domain docs
 
-Single-context: root `CONTEXT.md` + `docs/adr/`. See `docs/agents/domain.md`.
+Single-context: root `GLOSSARY.md` + `docs/adr/`. See `docs/agents/domain.md`.
 
 ## Reference
 
-- `CONTEXT.md` — package map, glossary, conventions, toolchain pins, known bugs
+- `GLOSSARY.md` — domain terms, in the `domain-modeling` format
+- `CONTEXT.md` — package map, conventions, toolchain pins, known bugs
 - `VISION.md` — north star, architecture, non-goals, success criteria
 - `BUGS.md` — the bug ledger and the `it.fails` convention that tracks it
 - `docs/adr/` — architecture decisions, including nine still open

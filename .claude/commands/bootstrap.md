@@ -7,7 +7,8 @@ the next return costs minutes rather than an afternoon of rediscovery.
 
 - `.claude/vision-digest.md` — injected at session start, but read it deliberately.
 - `CLAUDE.md` — the charter and the index to everything else.
-- `CONTEXT.md` — packages, glossary, commands, toolchain, known bugs, roadmap.
+- `GLOSSARY.md` — the domain terms. Use them in issues, tests, and proposals.
+- `CONTEXT.md` — packages, commands, toolchain, known bugs, roadmap.
 - `BUGS.md` — the ledger. Every known defect is pinned by two tests.
 - `docs/adr/` — nine decisions, seven of them still `proposed`.
 
