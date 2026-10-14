@@ -842,7 +842,7 @@ async function main() {
   ]);
 
   const origin = await startOrigin(routes);
-  const app = buildServer({ logger: false });
+  const app = buildServer({ logger: false, trustedOrigins: [origin.url] });
 
   const results: ScenarioResult[] = [];
   for (const scenario of scenarios) {

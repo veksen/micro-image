@@ -1,14 +1,14 @@
-import http from "http";
-import https from "https";
 import Fastify, { FastifyInstance, FastifyRequest } from "fastify";
-import axios from "axios";
 import sharp from "sharp";
 import { buildId, fromCache, toCache } from "./cache";
 import { isAnimated } from "./is-animated";
 import { coalesce } from "./coalesce";
-
-const httpAgent = new http.Agent({ keepAlive: true });
-const httpsAgent = new https.Agent({ keepAlive: true });
+import {
+  createUpstream,
+  parseTrustedOrigins,
+  toUpstreamError,
+  UpstreamError,
+} from "./upstream-guard";
 
 export interface CacheQuerystring {
   image: string;
@@ -270,47 +270,21 @@ export const DEFAULT_UPSTREAM_TIMEOUT_MS = 10_000;
  */
 export const DEFAULT_MAX_UPSTREAM_BYTES = 32 * 1024 * 1024;
 
+/** Unset falls back to the default. Set but unusable fails the boot. */
 function readPositiveEnv(name: string, fallback: number): number {
-  const configured = Number(process.env[name]);
+  const raw = process.env[name];
 
-  return Number.isFinite(configured) && configured > 0 ? configured : fallback;
-}
+  if (raw === undefined || raw === "") {
+    return fallback;
+  }
 
-export interface DownloadLimits {
-  timeoutMs?: number;
-  maxBytes?: number;
-}
+  const configured = Number(raw);
 
-export async function downloadImage(url: string, limits: DownloadLimits = {}) {
-  const maxBytes =
-    limits.maxBytes ?? readPositiveEnv("UPSTREAM_MAX_BYTES", DEFAULT_MAX_UPSTREAM_BYTES);
+  if (!Number.isFinite(configured) || configured <= 0) {
+    throw new Error(`${name} must be a positive number, got "${raw}"`);
+  }
 
-  // responseType "arraybuffer" resolves to a Buffer under Node's adapter, but
-  // axios types `data` as `any` without this. Stating it here is what lets the
-  // route use the body directly: the previous Buffer.from(data, "binary") was
-  // a full copy of every payload, and "binary" is latin1, which would have
-  // corrupted the bytes had the input ever actually been a string.
-  return axios<Buffer>(url, {
-    responseType: "arraybuffer",
-    httpAgent,
-    httpsAgent,
-    timeout:
-      limits.timeoutMs ?? readPositiveEnv("UPSTREAM_TIMEOUT_MS", DEFAULT_UPSTREAM_TIMEOUT_MS),
-    // axios tracks the running total and destroys the stream once it is passed,
-    // so an oversized body is refused rather than fully buffered first.
-    maxContentLength: maxBytes,
-    maxBodyLength: maxBytes,
-  });
-}
-
-/**
- * Failing to obtain the image is never an error *of the proxy*, so it must not
- * read as a 500. A timeout is reported as one, everything else as a bad gateway.
- */
-export function upstreamErrorStatus(error: unknown): number {
-  const code = axios.isAxiosError(error) ? error.code : undefined;
-
-  return code === "ECONNABORTED" || code === "ETIMEDOUT" ? 504 : 502;
+  return configured;
 }
 
 export interface BuildServerOptions {
@@ -318,6 +292,8 @@ export interface BuildServerOptions {
   /** Overrides the env-configured limits. Mainly so tests can use a short timeout. */
   upstreamTimeoutMs?: number;
   maxUpstreamBytes?: number;
+  /** Origins that skip the address check. Overrides `TRUSTED_ORIGINS`. */
+  trustedOrigins?: readonly string[];
 }
 
 /**
@@ -331,6 +307,18 @@ export interface BuildServerOptions {
 export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
   const fastify = Fastify({
     logger: options.logger ?? true,
+  });
+
+  // Configuration is read once, so a malformed value fails the boot.
+  const upstream = createUpstream({
+    trustedOrigins: parseTrustedOrigins(
+      options.trustedOrigins ?? (process.env.TRUSTED_ORIGINS ?? "").split(",")
+    ),
+    timeoutMs:
+      options.upstreamTimeoutMs ??
+      readPositiveEnv("UPSTREAM_TIMEOUT_MS", DEFAULT_UPSTREAM_TIMEOUT_MS),
+    maxBytes:
+      options.maxUpstreamBytes ?? readPositiveEnv("UPSTREAM_MAX_BYTES", DEFAULT_MAX_UPSTREAM_BYTES),
   });
 
   fastify.get("/", async (request, reply) => {
@@ -349,6 +337,18 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
         error: `unsupported format "${requested.format}"`,
         supported: [...Object.keys(formatMimes), passthroughFormat],
       };
+    }
+
+    // Refuse a malformed URL or a blocked IP literal before the cache is read.
+    try {
+      upstream.check(request.query.image);
+    } catch (error) {
+      if (!(error instanceof UpstreamError)) {
+        throw error;
+      }
+
+      reply.code(error.status);
+      return { error: error.clientMessage };
     }
 
     const id = buildId(request.query.image, requested);
@@ -377,10 +377,7 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
 
     try {
       result = await coalesce(id, async () => {
-        const image = await downloadImage(request.query.image, {
-          timeoutMs: options.upstreamTimeoutMs,
-          maxBytes: options.maxUpstreamBytes,
-        });
+        const image = await upstream.fetch(request.query.image);
 
         // axios types response header values as `AxiosHeaderValue | undefined`.
         // What reaches the wire is whatever resolveResponseMime is willing to
@@ -469,15 +466,15 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
         return { contentType: servedMime, body: imageBufferToUse };
       });
     } catch (error) {
-      const status = upstreamErrorStatus(error);
+      const failure = toUpstreamError(error);
 
       request.log.warn(
-        { err: error, image: request.query.image, status },
+        { err: failure, image: request.query.image, status: failure.status },
         "could not fetch the image from upstream"
       );
 
-      reply.code(status);
-      return { error: "could not fetch the image from upstream" };
+      reply.code(failure.status);
+      return { error: failure.clientMessage };
     }
 
     return send(result.contentType, result.body);
