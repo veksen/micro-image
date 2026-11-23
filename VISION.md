@@ -152,7 +152,8 @@ and config resolution — with zero framework knowledge.
 
 Each framework package does exactly one thing: **find `<Image>` elements whose import
 binding resolves to `@micro-image/image`, and rewrite them to hoist a `?micro` import and
-spread its result.** File reading, sharp, caching, and LQIP never leak into an adapter.
+pass its result as the `_micro` prop.** File reading, sharp, caching, and LQIP never leak into
+an adapter.
 
 Binding detection uses the parser's own scope/binding API — never hand-rolled data-flow
 analysis. Bias toward **precision, not recall**: never transform what you cannot prove is
@@ -204,10 +205,10 @@ transform is a pure optimization.
 
 ## Open decisions
 
-Ten design questions are unresolved and tracked as ADRs in `docs/adr/` (`0002`–`0011`).
+Nine design questions are unresolved and tracked as ADRs in `docs/adr/` (`0002`–`0011`).
 Resolve one before writing code that assumes an answer.
 
-Nine are `proposed`. `0003` (srcset ladder) is `blocked`: its cost model was arithmetic rather
+Eight are `proposed`. `0003` (srcset ladder) is `blocked`: its cost model was arithmetic rather
 than measurement, and checking it inverted the answer. It stays blocked until the benchmark
 supplies a bytes-vs-width curve over real content and codecs. Prefer a blocked ADR to a
 plausible one — a decision recorded on an assumption is harder to dislodge later than an

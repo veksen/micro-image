@@ -53,13 +53,14 @@ Adding an optional field is additive and cheap.
 Renaming or removing a field breaks all three paths simultaneously **and** is a published-API
 change to `@micro-image/image`. It needs a changeset and an ADR.
 
-Three of the open ADRs decide parts of this shape directly — resolve the relevant one instead
+Two of the open ADRs decide parts of this shape directly — resolve the relevant one instead
 of settling it implicitly in code:
 
 - `0002` — LQIP encoding (data-URI vs blurhash) decides what `placeholder` holds.
 - `0003` — srcset ladder (fixed vs per-image) decides how `srcset` is generated.
-- `0006` — prop injection surface (spread `{...meta}` vs a single `_micro` prop) decides
-  whether these are props at all.
+
+`0006` is accepted: the build passes this shape as a single `_micro` prop, which the component
+merges under any prop written by hand.
 
 ## Today's gap
 
