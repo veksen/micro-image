@@ -1,0 +1,13 @@
+{
+  "extends": "@micro-image/tsconfig/react-library.json",
+  "compilerOptions": {
+    "lib": ["DOM", "DOM.Iterable", "ES2023"],
+    "target": "ES2023",
+    "module": "preserve",
+    "types": ["vite/client", "@micro-image/unplugin/client"],
+    "noEmit": true,
+    "declaration": false,
+    "declarationMap": false
+  },
+  "include": ["src", "vite.config.ts"]
+}

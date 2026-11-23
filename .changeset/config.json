@@ -12,7 +12,8 @@
     "@micro-image/docs",
     "@micro-image/tsconfig",
     "@micro-image/unplugin",
-    "@micro-image/plugin-react"
+    "@micro-image/plugin-react",
+    "@micro-image/example-vite"
   ],
   "privatePackages": { "version": true, "tag": true }
 }
