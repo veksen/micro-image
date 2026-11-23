@@ -1,0 +1,64 @@
+{
+  "name": "@micro-image/unplugin",
+  "version": "0.0.0",
+  "keywords": [
+    "unplugin",
+    "vite-plugin",
+    "image",
+    "responsive-images"
+  ],
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.mts",
+      "default": "./dist/index.mjs"
+    },
+    "./vite": {
+      "types": "./dist/vite.d.mts",
+      "default": "./dist/vite.mjs"
+    },
+    "./client": {
+      "types": "./client.d.ts"
+    }
+  },
+  "sideEffects": false,
+  "license": "MIT",
+  "files": [
+    "dist/**",
+    "client.d.ts"
+  ],
+  "scripts": {
+    "build": "tsdown",
+    "dev": "tsdown --watch",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf .turbo && rm -rf node_modules && rm -rf dist",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "sharp": "^0.35.3",
+    "unplugin": "^3.7.0"
+  },
+  "devDependencies": {
+    "@micro-image/image": "*",
+    "@micro-image/tsconfig": "*",
+    "@types/node": "^24.13.3",
+    "tsdown": "^0.22.14",
+    "typescript": "^7.0.2",
+    "vite": "^8.2.0"
+  },
+  "peerDependencies": {
+    "@micro-image/image": "*",
+    "vite": ">=7"
+  },
+  "peerDependenciesMeta": {
+    "@micro-image/image": {
+      "optional": true
+    },
+    "vite": {
+      "optional": true
+    }
+  }
+}
