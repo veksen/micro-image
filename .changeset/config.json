@@ -11,7 +11,8 @@
     "micro-image-cache",
     "@micro-image/docs",
     "@micro-image/tsconfig",
-    "@micro-image/unplugin"
+    "@micro-image/unplugin",
+    "@micro-image/plugin-react"
   ],
   "privatePackages": { "version": true, "tag": true }
 }
