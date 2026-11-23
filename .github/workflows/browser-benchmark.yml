@@ -20,7 +20,7 @@ permissions:
 
 env:
   # The rows CI gates on. A PR that adds a strategy the component ships adds it here.
-  BENCH_STRATEGIES: shipped
+  BENCH_STRATEGIES: shipped,shipped+sizes
   BENCH_LAYOUTS: full,column,grid,thumb
   BENCH_VIEWPORTS: 375@3,1280@2,1920@1
   # widths and bytes match across loads, so one per cell is enough

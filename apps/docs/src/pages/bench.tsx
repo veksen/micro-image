@@ -102,13 +102,15 @@ function StrategyImage({ strategy, layout, origin, proxy, index }: BenchProps & 
   const { fixture } = layout;
   const path = fixturePath(fixture, index);
 
-  if (strategy === "shipped") {
+  if (strategy === "shipped" || strategy === "shipped+sizes") {
     return (
       <MicroImage
         src={`${origin}${path}`}
         width={fixture.width}
         height={fixture.height}
         objectFit="cover"
+        loading={lazy ? "lazy" : "eager"}
+        sizes={strategy === "shipped+sizes" && !lazy ? layout.exactSizes : undefined}
       />
     );
   }

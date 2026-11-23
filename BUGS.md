@@ -202,6 +202,11 @@ gated on [ADR 0011](docs/adr/0011-provider-selection.md), which is still `propos
 > page never displayed; it now runs against the rendered element, so a failing
 > placeholder hides the image where it previously showed a broken one. The first
 > paint still ships no `srcset`, so BUG-10 stays open.
+>
+> #71 fixed BUG-10 for lazy images and for eager images with a written `sizes`. An eager image
+> without `sizes` still ships no `srcset` until its box is measured, on purpose: nothing knows
+> its slot before layout, and a viewport guess fetched 1.2–3× the needed width for a column or
+> grid cell in the browser benchmark.
 
 ## Coverage
 
@@ -216,7 +221,7 @@ gated on [ADR 0011](docs/adr/0011-provider-selection.md), which is still `propos
 | 7   | duplicate `if (!imageRef.current) return;`                          | —                                                           | **fixed** ([#15](https://github.com/veksen/micro-image/issues/15)) |
 | 8   | `useImage` cleanup calls `removeEventListener` on property handlers | — (see correction)                                          | **fixed** ([#16](https://github.com/veksen/micro-image/issues/16)) |
 | 9   | `loaded` / `fetching` returned but never gate rendering             | — (see correction)                                          | **fixed** ([#16](https://github.com/veksen/micro-image/issues/16)) |
-| 10  | first paint ships no `srcset` / `sizes` for the preload scanner     | `image.component.test.tsx`                                  | yes                                                                |
+| 10  | first paint ships no `srcset` / `sizes` for the preload scanner     | `image.component.test.tsx`                                  | **fixed** ([#17](https://github.com/veksen/micro-image/issues/17)) |
 | 11  | `getImageProportions` downloads the full original for two integers  | `image-utils.test.ts`                                       | yes                                                                |
 | 12  | `Compare` clobbers `onload` and never cleans up                     | `compare.component.test.tsx`                                | yes                                                                |
 | 13  | `/api/meta` mishandles a missing `content-length` (see correction)  | `__tests__/api-meta.test.ts`                                | yes                                                                |
