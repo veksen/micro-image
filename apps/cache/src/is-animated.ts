@@ -27,7 +27,8 @@
  * it never searches for bytes that could occur inside pixel data.
  */
 
-import sharp from "sharp";
+import sharp, { type Metadata } from "sharp";
+import { hasNoOpProfile } from "./srgb-profile";
 
 /**
  * How many frames the image holds — or `null` when nothing can decode it.
@@ -39,6 +40,22 @@ import sharp from "sharp";
  * parser's endianness bug hide.
  */
 export async function frameCount(buffer: Buffer): Promise<number | null> {
+  return (await probe(buffer)).frames;
+}
+
+/** What the route needs to know about an image before transforming it. */
+export interface Probe {
+  /** As `frameCount`: `null` when nothing can decode the image. */
+  frames: number | null;
+  /** The embedded-profile conversion can be skipped; see `hasNoOpProfile`. */
+  noOpProfile: boolean;
+}
+
+/**
+ * One header read answers both questions, so the transform does not pay for a
+ * second `metadata()` call to learn about the profile.
+ */
+export async function probe(buffer: Buffer): Promise<Probe> {
   let metadata;
 
   try {
@@ -46,9 +63,13 @@ export async function frameCount(buffer: Buffer): Promise<number | null> {
   } catch {
     // Undecodable. Callers treat this as "not animated" and let the transform
     // fail on its own terms, which keeps the error surface in one place.
-    return null;
+    return { frames: null, noOpProfile: false };
   }
 
+  return { frames: framesFromMetadata(buffer, metadata), noOpProfile: hasNoOpProfile(metadata) };
+}
+
+function framesFromMetadata(buffer: Buffer, metadata: Metadata): number {
   // libvips populates `pages` on a default load for every format it can page.
   if (metadata.pages !== undefined) {
     return metadata.pages;

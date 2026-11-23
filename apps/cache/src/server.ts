@@ -1,7 +1,7 @@
 import Fastify, { FastifyInstance, FastifyRequest } from "fastify";
 import sharp from "sharp";
 import { buildId, fromCache, toCache } from "./cache";
-import { isAnimated } from "./is-animated";
+import { probe } from "./is-animated";
 import { coalesce } from "./coalesce";
 import {
   createUpstream,
@@ -105,6 +105,11 @@ export interface CompressOptions {
   /** Blur sigma. Absent means no blur. */
   blur?: number;
   quality?: number;
+  /**
+   * The embedded profile is one whose conversion to sRGB is a measured no-op
+   * (`hasNoOpProfile`), so sharp may skip it. Output is identical either way.
+   */
+  noOpProfile?: boolean;
 }
 
 export const gifMime = "image/gif";
@@ -238,7 +243,7 @@ export function imageFromMime(image: sharp.Sharp, mime?: string, quality?: numbe
 }
 
 export function compress(buffer: Buffer, options: CompressOptions): Promise<Buffer> {
-  let sharpImage = sharp(buffer);
+  let sharpImage = sharp(buffer, options.noOpProfile ? { ignoreIcc: true } : {});
 
   if (options.width) {
     sharpImage = sharpImage.resize({ width: options.width, withoutEnlargement: true });
@@ -397,7 +402,9 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
         // No mime guard: the probe asks the decoder rather than reading fixed
         // offsets, so it cannot mistake a JPEG's quantization table for a GIF
         // extension block the way the guard this replaced could.
-        if (await isAnimated(imageBuffer)) {
+        const probed = await probe(imageBuffer);
+
+        if (probed.frames !== null && probed.frames > 1) {
           toCache(id, {
             contentType: upstreamContentType,
             buffer: imageBuffer,
@@ -416,6 +423,7 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
             width: requested.width,
             blur: requested.blur,
             quality: requested.quality,
+            noOpProfile: probed.noOpProfile,
           });
         } catch (error) {
           // The bytes are already here and the client wants an image, so serve
