@@ -93,6 +93,7 @@ export const layouts: Record<LayoutName, Layout> = {
 
 export const strategyNames = [
   "shipped",
+  "shipped+sizes",
   "bake-100vw",
   "bake-100vw+obs",
   "exact",

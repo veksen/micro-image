@@ -2,8 +2,9 @@
  * @vitest-environment jsdom
  */
 import React from "react";
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { render, act, cleanup, fireEvent } from "@testing-library/react";
+import { renderToString } from "react-dom/server";
 import Image from "./image.component";
 import { FakeImage, FakeResizeObserver, installDomStubs } from "./test-helpers";
 
@@ -12,22 +13,22 @@ const PROXY = "http://localhost:4000/cache";
 
 beforeEach(() => {
   installDomStubs();
+  // run the measured frame at once, so a resize reads as one synchronous step
+  vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+    callback(0);
+    return 0;
+  });
+  vi.stubGlobal("cancelAnimationFrame", () => {});
 });
 
 afterEach(() => {
   cleanup();
+  vi.unstubAllGlobals();
 });
 
 function renderImage(props: Partial<React.ComponentProps<typeof Image>> = {}) {
   const result = render(<Image src={SRC} width={800} height={600} alt="a cat" {...props} />);
   return { ...result, img: () => result.container.querySelector("img") };
-}
-
-/** Flush the requestAnimationFrame the resize callback defers to. */
-async function flushFrame() {
-  await act(async () => {
-    await new Promise((resolve) => requestAnimationFrame(() => resolve(null)));
-  });
 }
 
 describe("Image — rendering", () => {
@@ -63,24 +64,15 @@ describe("Image — rendering", () => {
     expect(img()!.style.objectFit).toBe("cover");
   });
 
-  it("observes the img element for resizes", () => {
-    const { img } = renderImage();
+  it("does not measure the element: sizes comes from the markup alone", () => {
+    renderImage();
 
-    expect(FakeResizeObserver.instances).toHaveLength(1);
-    expect(FakeResizeObserver.instances[0]!.observed[0]).toBe(img());
-  });
-
-  it("disconnects the observer on unmount", () => {
-    const { unmount } = renderImage();
-
-    unmount();
-
-    expect(FakeResizeObserver.instances[0]!.disconnected).toBe(true);
+    expect(FakeResizeObserver.instances).toHaveLength(0);
   });
 });
 
-describe("Image — initial paint has no srcset [BUG-10]", () => {
-  it("renders the blurred 500px placeholder as the only src", () => {
+describe("Image — first paint", () => {
+  it("keeps the blurred placeholder as the src for browsers without srcset", () => {
     const { img } = renderImage();
 
     expect(img()!.getAttribute("src")).toBe(
@@ -88,53 +80,206 @@ describe("Image — initial paint has no srcset [BUG-10]", () => {
     );
   });
 
-  it("ships no srcset and no sizes attribute on first paint", () => {
-    const { img } = renderImage();
+  const widths = (srcset: string) => srcset.split(", ").map((c) => c.split(" ")[1]);
 
-    // the preload scanner sees only the placeholder; the real variant cannot
-    // start until React mounts and the ResizeObserver fires
-    expect(img()!.getAttribute("srcset")).toBeNull();
-    expect(img()!.getAttribute("sizes")).toBeNull();
+  /** The build's intrinsic width, which is the only width that caps the ladder. */
+  const micro = (width: number) => ({ _micro: { src: SRC, width, height: 600 } });
+
+  it("caps the srcset at _micro's intrinsic width", () => {
+    const { img } = renderImage(micro(800));
+
+    // a DPR 2 display asked for 1200, 1600 and 1900w of an 800px source
+    expect(widths(img()!.srcset)).toEqual([
+      "100w",
+      "200w",
+      "300w",
+      "400w",
+      "500w",
+      "600w",
+      "700w",
+      "800w",
+    ]);
   });
 
-  it("only sets srcset and sizes after a resize is observed", async () => {
-    const { img } = renderImage();
+  it("ends the srcset on an intrinsic width between steps", () => {
+    const { img } = renderImage(micro(850));
 
-    act(() => FakeResizeObserver.instances[0]!.resizeTo(640));
-    await flushFrame();
-
-    expect(img()!.sizes).toBe("700px");
-    expect(img()!.srcset).toContain("100w");
+    expect(widths(img()!.srcset).slice(-2)).toEqual(["800w", "850w"]);
   });
 
-  it("rounds the observed width up to the next 100px bucket", async () => {
-    const { img } = renderImage();
+  it("offers only the source width for a source narrower than one step", () => {
+    const { img } = renderImage(micro(64));
 
-    act(() => FakeResizeObserver.instances[0]!.resizeTo(601));
-    await flushFrame();
-
-    expect(img()!.sizes).toBe("700px");
+    expect(widths(img()!.srcset)).toEqual(["64w"]);
   });
 
-  it("generates 19 srcset candidates from 100w to 1900w", async () => {
-    const { img } = renderImage();
+  it("still stops the srcset at 1900w for a wider source", () => {
+    const { img } = renderImage(micro(4000));
 
-    act(() => FakeResizeObserver.instances[0]!.resizeTo(640));
-    await flushFrame();
-
-    const candidates = img()!.srcset.split(", ");
+    const candidates = widths(img()!.srcset);
     expect(candidates).toHaveLength(19);
-    expect(candidates[0]).toContain(" 100w");
-    expect(candidates[18]).toContain(" 1900w");
+    expect(candidates.at(-1)).toBe("1900w");
   });
 
-  it("puts the requested width into each srcset candidate url", async () => {
-    const { img } = renderImage();
+  it("does not cap the srcset at a written width, which only sets the ratio", () => {
+    // a 5272px photo shown in a small box, as the docs page writes it
+    const { img } = renderImage({ width: 183, height: 137 });
 
-    act(() => FakeResizeObserver.instances[0]!.resizeTo(640));
-    await flushFrame();
+    expect(widths(img()!.srcset).at(-1)).toBe("1900w");
+  });
+
+  it("caps at _micro's width even when a written width overrides the ratio", () => {
+    const { img } = renderImage({ ...micro(800), width: 183, height: 137 });
+
+    expect(widths(img()!.srcset).at(-1)).toBe("800w");
+  });
+
+  it("puts the requested width into each srcset candidate url", () => {
+    const { img } = renderImage();
 
     expect(img()!.srcset).toContain("width=100&quality=75");
+  });
+
+  it("loads lazily by default and lets the browser size it with auto", () => {
+    const { img } = renderImage();
+
+    expect(img()!.getAttribute("loading")).toBe("lazy");
+    expect(img()!.getAttribute("sizes")).toBe("auto, 100vw");
+  });
+
+  it("caps the sizes fallback at _micro's intrinsic width", () => {
+    const { img } = renderImage(micro(800));
+
+    expect(img()!.getAttribute("sizes")).toBe("auto, (max-width: 800px) 100vw, 800px");
+  });
+
+  it("ships no srcset for an eager image without sizes until its box is measured", () => {
+    const { img } = renderImage({ loading: "eager" });
+
+    expect(img()!.getAttribute("loading")).toBe("eager");
+    expect(img()!.hasAttribute("srcset")).toBe(false);
+    expect(img()!.hasAttribute("sizes")).toBe(false);
+    // and no blurred placeholder request either
+    expect(img()!.hasAttribute("src")).toBe(false);
+  });
+
+  it("sets srcset and sizes from the measured box, rounded up to the ladder step", () => {
+    const { img } = renderImage({ loading: "eager" });
+
+    act(() => FakeResizeObserver.instances[0].resizeTo(612));
+
+    expect(img()!.getAttribute("sizes")).toBe("700px");
+    expect(img()!.getAttribute("srcset")).toContain("800w");
+  });
+
+  it("only ever raises the measured sizes", () => {
+    const { img } = renderImage({ loading: "eager" });
+    const observer = FakeResizeObserver.instances[0];
+
+    act(() => observer.resizeTo(612));
+    act(() => observer.resizeTo(300));
+    expect(img()!.getAttribute("sizes")).toBe("700px");
+
+    act(() => observer.resizeTo(750));
+    expect(img()!.getAttribute("sizes")).toBe("800px");
+  });
+
+  it("server-renders a noscript copy with a srcset for browsers without JavaScript", () => {
+    const html = renderToString(<Image src={SRC} width={800} height={600} loading="eager" />);
+
+    expect(html).toMatch(/<noscript><img srcSet="[^"]+" sizes="auto, 100vw"/);
+    // nothing outside the noscript for React to preload at the viewport width
+    expect(html).not.toContain('rel="preload"');
+  });
+
+  it("disconnects the observer on unmount", () => {
+    const { unmount } = renderImage({ loading: "eager" });
+
+    unmount();
+
+    expect(FakeResizeObserver.instances[0]!.disconnected).toBe(true);
+  });
+
+  it("observes the remounted element after a failure, not the one it replaced", () => {
+    const { img, rerender } = renderImage({ loading: "eager" });
+
+    act(() => fireEvent.error(img()!));
+    rerender(
+      <Image
+        src="https://example.com/dog.jpg"
+        width={800}
+        height={600}
+        alt="a dog"
+        loading="eager"
+      />
+    );
+
+    const observer = FakeResizeObserver.instances.at(-1)!;
+    expect(observer.observed[0]).toBe(img());
+    act(() => observer.resizeTo(640));
+    expect(img()!.getAttribute("sizes")).toBe("700px");
+  });
+
+  it("measures once when ResizeObserver is missing, rather than staying empty", () => {
+    vi.stubGlobal("ResizeObserver", undefined);
+    const rect = vi
+      .spyOn(HTMLElement.prototype, "getBoundingClientRect")
+      .mockReturnValue({ width: 612 } as DOMRect);
+
+    const { img } = renderImage({ loading: "eager" });
+
+    expect(img()!.getAttribute("sizes")).toBe("700px");
+    rect.mockRestore();
+  });
+
+  it("keeps the alt off the sourceless img until it is measured", () => {
+    const { img } = renderImage({ loading: "eager" });
+    expect(img()!.getAttribute("alt")).toBe("");
+
+    act(() => FakeResizeObserver.instances[0]!.resizeTo(612));
+    expect(img()!.getAttribute("alt")).toBe("a cat");
+  });
+
+  it("ignores a box that is not laid out yet", () => {
+    const { img } = renderImage({ loading: "eager" });
+
+    act(() => FakeResizeObserver.instances[0].resizeTo(0));
+
+    expect(img()!.hasAttribute("srcset")).toBe(false);
+  });
+
+  it("does not measure an eager image whose sizes is written", () => {
+    renderImage({ loading: "eager", sizes: "50vw" });
+
+    expect(FakeResizeObserver.instances).toHaveLength(0);
+  });
+
+  it("shows _micro's placeholder inline behind an eager image being measured", () => {
+    const placeholder = "data:image/jpeg;base64,AAAA";
+    const { container } = render(
+      <Image _micro={{ src: SRC, width: 800, height: 600, placeholder }} loading="eager" />
+    );
+
+    const box = container.querySelector("img")!.parentElement!;
+    expect(box.style.backgroundImage).toBe(`url("${placeholder}")`);
+  });
+
+  it("takes the placeholder off once the real image has loaded", () => {
+    const placeholder = "data:image/jpeg;base64,AAAA";
+    const { container } = render(
+      <Image _micro={{ src: SRC, width: 800, height: 600, placeholder }} loading="eager" />
+    );
+    const img = container.querySelector("img")!;
+
+    act(() => fireEvent.load(img));
+
+    expect(img.parentElement!.style.backgroundImage).toBe("");
+  });
+
+  it("honours an explicit sizes prop", () => {
+    const { img } = renderImage({ loading: "eager", sizes: "(max-width: 40em) 100vw, 40em" });
+
+    expect(img()!.getAttribute("sizes")).toBe("(max-width: 40em) 100vw, 40em");
   });
 });
 
@@ -158,20 +303,6 @@ describe("Image — failure", () => {
 
     // a boolean would have latched here and rendered nothing forever
     expect(img()).not.toBeNull();
-  });
-
-  it("observes the remounted element, not the one it replaced", async () => {
-    const { img, rerender } = renderImage();
-
-    act(() => fireEvent.error(img()!));
-    rerender(<Image src="https://example.com/dog.jpg" width={800} height={600} alt="a dog" />);
-
-    const observer = FakeResizeObserver.instances.at(-1)!;
-    expect(observer.observed[0]).toBe(img());
-
-    act(() => observer.resizeTo(640));
-    await flushFrame();
-    expect(img()!.sizes).toBe("700px");
   });
 });
 
@@ -243,13 +374,13 @@ describe("Image — _micro", () => {
 });
 
 describe("bug ledger", () => {
-  it.fails("BUG-10: first paint should carry a srcset for the preload scanner", () => {
+  it("BUG-10: first paint should carry a srcset for the preload scanner", () => {
     const { img } = renderImage();
 
     expect(img()!.getAttribute("srcset")).not.toBeNull();
   });
 
-  it.fails("BUG-10: first paint should carry a sizes attribute", () => {
+  it("BUG-10: first paint should carry a sizes attribute", () => {
     const { img } = renderImage();
 
     expect(img()!.getAttribute("sizes")).not.toBeNull();
