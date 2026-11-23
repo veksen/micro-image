@@ -41,29 +41,36 @@ Multi-source `<picture>` output stays a future addition, not a launch requiremen
 
 ## Progress
 
-Still proposed. Two steps have landed, and they are the half of this ADR that does not
-depend on ratifying it.
+Still proposed, though the mechanism has now landed in full.
 
 The cache-key prerequisite above is met (#8). The key now carries format, so a WebP and a
 JPEG of the same source no longer collide.
 
-The proxy encodes to an explicitly requested format (#9), via `?format=`. That is the
-mechanism this ADR assumes, but not the policy: selection is still the caller's, not the
-proxy's.
+The proxy encodes to an explicitly requested format (#9), via `?format=`.
 
-What ratification would still require:
+The proxy negotiates on `Accept` when a request names no format (`negotiateFormat` in
+`apps/cache/src/server.ts`):
 
-- Negotiation keyed on `Accept`, which is the actual decision here.
-- The cache key must then include the **resolved** format rather than the requested one, and
-  responses need `Vary: Accept`. Keying on the request alone would let a WebP answer a client
-  that did not accept it.
-- **`Vary: Accept` conflicts with the `immutable` currently in `cacheControl`.** RFC 9110 §12.5.5
-  makes `Vary` expand the cache key; `immutable` asserts the response never changes. A shared
-  cache may resolve that pair badly, and CDN-specific behaviour here is unresearched. Settle it
-  before ratifying — see `docs/research/image-format-coverage.md` §10.
-- Negotiation must parse media ranges per §12.5.1 precedence, not substring-match. Every shipping
-  engine terminates its image `Accept` with `image/*;q=0.8` or `*/*;q=0.5`, which formally matches
-  AVIF at a lower weight — so `header.includes("image/avif")` is wrong. Safari also announces
-  `image/heic`, which this build cannot decode, and Lockdown Mode announces only WebP.
-- `?format=auto` is deliberately unimplemented and reserved for exactly that meaning. It is
-  not a synonym for the source format — `?format=original` is.
+- Only an exact `image/avif` or `image/webp` entry with q > 0 counts. The `image/*` and `*/*`
+  tails every engine sends formally match AVIF (RFC 9110 §12.5.1), but a wildcard is also what
+  curl sends, so reading it as a request for AVIF would convert for clients that never asked.
+  Highest q wins; a tie goes to AVIF.
+- The **resolved** format goes into the id, and that id is shared by the cache and the request
+  coalescer, so an AVIF and a WebP of one source never share an entry or an in-flight result.
+- Every negotiated response carries `Vary: Accept`, including the ones that kept the source
+  format. An explicit `?format=`, including `original`, does not vary.
+- `?format=auto` stays unimplemented. An absent format already means "negotiate", so a second
+  spelling would only split the cache.
+
+On the `Vary: Accept` / `immutable` question raised in `docs/research/image-format-coverage.md`
+§10: the pair is not a contradiction. RFC 8246 defines `immutable` as "the response will not be
+updated during its freshness lifetime"; `Vary` selects which stored response answers a request.
+Each Accept-keyed representation is itself immutable, so both hold. The live risk is a shared
+cache that **ignores** `Vary`, which would serve one client's format to every client. Cloudflare,
+for one, does not honour `Vary: Accept` for images unless its "Vary for Images" setting is turned
+on (developers.cloudflare.com/cache/advanced-configuration/vary-for-images/). Any CDN put in
+front of the proxy needs this checked first. Whether the current host adds one is unchecked.
+
+What ratification would still require: a decision to make this the default. The proxy now
+negotiates for every request without a `format`, which moves Chromium and Firefox traffic onto
+AVIF and its roughly 10x encode CPU on a cold miss.
