@@ -10,6 +10,15 @@ import {
   UpstreamError,
 } from "./upstream-guard";
 
+/**
+ * libvips' operation cache only pays when the same operation repeats on the same
+ * input, and every transform here starts from freshly downloaded bytes, so it
+ * never hits. It still holds up to 100 operations and their images. Off, peak
+ * RSS under 4 concurrent cold requests fell 9-16% (10 of 10 alternated pairs,
+ * linux-arm64) with every output byte identical over the 840-case fingerprint.
+ */
+sharp.cache(false);
+
 export interface CacheQuerystring {
   image: string;
   width?: string;
