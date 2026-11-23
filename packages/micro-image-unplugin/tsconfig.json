@@ -1,0 +1,13 @@
+{
+  "extends": "@micro-image/tsconfig/base.json",
+  "compilerOptions": {
+    "lib": ["ES2023"],
+    "module": "preserve",
+    "moduleResolution": "bundler",
+    "target": "ES2023",
+    "types": ["node"],
+    "noEmit": true
+  },
+  "include": ["src", "client.d.ts", "tsdown.config.ts", "vitest.config.ts"],
+  "exclude": ["dist", "node_modules", "src/**/fixtures/**"]
+}
