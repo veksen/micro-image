@@ -277,6 +277,19 @@ export const avifQuality = 50;
  */
 export const avifEffort = 4;
 
+/**
+ * sharp encodes AVIF at 4:4:4 unless told otherwise, unlike its JPEG and WebP
+ * encoders, which subsample by default.
+ *
+ * Measured on the benchmark photo fixture at 400w, quality 50, effort 4
+ * (linux-x64): 4:2:0 is 3,572 bytes against 4:4:4's 4,591 (-22%) and 215 ms of
+ * CPU against 301 ms (-29%). RMSE rises from 3.32 to 3.84, still below mozjpeg
+ * quality 75's 4.34 at 8,205 bytes on the same measure. Saturated colour edges
+ * (red text on a flat ground) are where 4:2:0 would show, and the fixture has
+ * none.
+ */
+export const avifChromaSubsampling = "4:2:0";
+
 export function imageFromMime(image: sharp.Sharp, mime?: string, quality?: number): sharp.Sharp {
   const effectiveQuality = quality ?? defaultQuality;
 
@@ -289,7 +302,11 @@ export function imageFromMime(image: sharp.Sharp, mime?: string, quality?: numbe
       return image.webp({ quality: effectiveQuality });
     case "image/avif":
       // An explicit ?quality= still wins: the default is a default, not a cap.
-      return image.avif({ quality: quality ?? avifQuality, effort: avifEffort });
+      return image.avif({
+        quality: quality ?? avifQuality,
+        effort: avifEffort,
+        chromaSubsampling: avifChromaSubsampling,
+      });
     case "image/gif":
       return image.gif();
     case "image/jpg":
