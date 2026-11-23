@@ -24,7 +24,7 @@ path produce a different shape is the failure mode that ends the project.
 
 **Adapters do one thing.** A `@micro-image/plugin-*` package finds `<Image>` elements whose
 import binding resolves to `@micro-image/image` and rewrites them to hoist a `?micro` import
-and spread its result. File reading, sharp, caching, the `ImageMeta` codec, and LQIP live in
+and pass its result as the `_micro` prop. File reading, sharp, caching, the `ImageMeta` codec, and LQIP live in
 the shared core. An adapter that grows a second job is a bug — it means the next framework
 costs thousands of lines instead of hundreds.
 
@@ -37,7 +37,7 @@ corrupts a build; a missed one costs one small JSON request.
 ## Before you change the contract
 
 Adding a field is additive and cheap. Renaming or removing one breaks every path at once and
-is a published-API change to `@micro-image/image` — it needs a changeset and an ADR. Several
-of the open ADRs in `docs/adr/` (`0002` LQIP encoding, `0003` srcset ladder, `0006` prop
-injection surface) decide parts of this shape. Resolve the relevant one rather than settling
+is a published-API change to `@micro-image/image` — it needs a changeset and an ADR. Two of
+the open ADRs in `docs/adr/` (`0002` LQIP encoding, `0003` srcset ladder) decide parts of this
+shape. Resolve the relevant one rather than settling
 it implicitly in code.

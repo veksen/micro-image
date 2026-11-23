@@ -16,7 +16,8 @@ Webpack, esbuild, Rspack, and Rolldown.
 The core has **zero framework knowledge**.
 
 **Each adapter does exactly one thing:** find `<Image>` elements whose import binding resolves
-to `@micro-image/image`, and rewrite them to hoist a `?micro` import and spread its result.
+to `@micro-image/image`, and rewrite them to hoist a `?micro` import and pass its result as the
+`_micro` prop (ADR `0006`).
 
 ```jsx
 // authored
@@ -24,7 +25,7 @@ to `@micro-image/image`, and rewrite them to hoist a `?micro` import and spread 
 
 // after transform (conceptual)
 import _micro0 from "./hero.jpg?micro";
-<Image {..._micro0} alt="…" />;
+<Image _micro={_micro0} alt="…" />;
 ```
 
 | Package                      | Transforms                    | Parser              |

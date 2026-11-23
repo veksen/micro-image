@@ -38,19 +38,61 @@ const generateSrcSet = ({
     .join(", ");
 };
 
-export interface IImageProps<GeneratorOptions extends IProviderOptions> {
+/**
+ * What the build knows about one image. An adapter injects it as the `_micro`
+ * prop, and a `?micro` import produces it. See ADR 0006.
+ */
+export interface MicroImage {
   src: string;
+  /** Intrinsic pixel width. */
   width: number;
+  /** Intrinsic pixel height. */
   height: number;
+  /** Inline LQIP. Accepted, not rendered yet. */
+  placeholder?: string;
+}
+
+/**
+ * Either the caller writes `src`, `width` and `height`, or `_micro` supplies
+ * them. With `_micro`, any of the three can still be written, and the written
+ * value wins.
+ */
+export type IImageProps<GeneratorOptions extends IProviderOptions> = {
   alt?: string;
   objectFit?: "none" | "cover" | "contain";
   generatorOptions?: Partial<GeneratorOptions>;
+} & (
+  | { src: string; width: number; height: number; _micro?: undefined }
+  | { _micro: MicroImage; src?: string; width?: number; height?: number }
+);
+
+/**
+ * Merges written props over `_micro`.
+ *
+ * Width and height only set the aspect ratio, so they are taken as a pair. A
+ * lone written width, mixed with `_micro`'s height, would distort the box, so
+ * it is ignored and `_micro`'s intrinsic pair is used instead.
+ */
+function resolveImage<GeneratorOptions extends IProviderOptions>(
+  props: IImageProps<GeneratorOptions>
+): { src: string; width: number; height: number } {
+  const micro = props._micro;
+  if (micro === undefined) {
+    return { src: props.src, width: props.width, height: props.height };
+  }
+
+  const src = props.src ?? micro.src;
+  if (props.width !== undefined && props.height !== undefined) {
+    return { src, width: props.width, height: props.height };
+  }
+  return { src, width: micro.width, height: micro.height };
 }
 
 function Image<GeneratorOptions extends IProviderOptions = IProviderOptions>(
   props: IImageProps<GeneratorOptions>
 ): React.JSX.Element {
   const config = useImageCacheConfig();
+  const { src, width, height } = resolveImage(props);
 
   const imageRef = useRef<HTMLImageElement | null>(null);
   const observerRef = useRef<ResizeObserver | null>(null);
@@ -63,20 +105,20 @@ function Image<GeneratorOptions extends IProviderOptions = IProviderOptions>(
    * where a boolean would have latched and rendered nothing forever.
    */
   const [failedSrc, setFailedSrc] = useState<string | null>(null);
-  const failed = failedSrc === props.src;
+  const failed = failedSrc === src;
 
   const blurredImageSrc = config.generateUrl({
     ...config.defaultGeneratorOptions,
     ...props.generatorOptions,
     url: config.cacheProxyUrl,
-    src: props.src,
+    src,
     width: 500,
     blur: 5,
   });
 
   const srcSet = useMemo(() => {
     return generateSrcSet({
-      baseSrc: props.src,
+      baseSrc: src,
       cacheProxyUrl: config.cacheProxyUrl,
       generator: config.generateUrl,
       defaultGeneratorOptions: {
@@ -85,7 +127,7 @@ function Image<GeneratorOptions extends IProviderOptions = IProviderOptions>(
       },
     });
   }, [
-    props.src,
+    src,
     props.generatorOptions,
     config.cacheProxyUrl,
     config.generateUrl,
@@ -127,7 +169,7 @@ function Image<GeneratorOptions extends IProviderOptions = IProviderOptions>(
     <div
       style={
         {
-          "--ratio": props.width / props.height,
+          "--ratio": width / height,
           position: "relative",
           width: "100%",
           height: 0,
@@ -147,7 +189,7 @@ function Image<GeneratorOptions extends IProviderOptions = IProviderOptions>(
         {!failed && (
           <img
             src={blurredImageSrc}
-            onError={() => setFailedSrc(props.src)}
+            onError={() => setFailedSrc(src)}
             ref={imageRef}
             style={{
               width: "100%",

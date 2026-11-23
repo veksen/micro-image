@@ -1,10 +1,10 @@
 ---
-status: proposed
+status: accepted
 ---
 
 # Build-time metadata is injected as a single `_micro` prop
 
-**Not ratified.** Open question 5 from `VISION.md`.
+Open question 5 from `VISION.md`, accepted 2026-11-23.
 
 ## Context
 
@@ -21,10 +21,17 @@ The contract already says the component accepts each field as an optional prop, 
 runtime `?meta` path fills them in. So this is really a question about the _build-time_ path's
 injection, not about the component's public API.
 
-## Decision (proposed)
+## Decision
 
 Inject a **single `_micro` prop**. The component destructures it internally and merges it
-under any explicitly-passed prop, so a consumer writing `width={800}` always wins.
+under any explicitly-passed prop, so a consumer writing `src` always wins.
+
+`width` and `height` only set the aspect ratio, so they merge as a pair. Both written: the
+written pair wins. Only one written: it is ignored and `_micro`'s intrinsic pair is used,
+because mixing a written width with `_micro`'s height would distort the box.
+
+The props type is a union. A caller writes `src`, `width` and `height`, or passes `_micro`
+and may still write any of the three. Omitting both is a type error.
 
 ## Consequences
 

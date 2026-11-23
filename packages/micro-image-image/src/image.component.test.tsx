@@ -175,6 +175,73 @@ describe("Image — failure", () => {
   });
 });
 
+describe("Image — _micro", () => {
+  const MICRO = { src: "https://example.com/hero.jpg", width: 1600, height: 900 };
+
+  function ratio(container: HTMLElement) {
+    return (container.firstElementChild as HTMLElement).style.getPropertyValue("--ratio");
+  }
+
+  it("takes src and the aspect ratio from _micro when nothing is written", () => {
+    const { container } = render(<Image _micro={MICRO} alt="hero" />);
+
+    expect(container.querySelector("img")!.getAttribute("src")).toBe(
+      `${PROXY}?image=${encodeURIComponent(MICRO.src)}&width=500&blur=5`
+    );
+    expect(ratio(container)).toBe(String(1600 / 900));
+  });
+
+  it("uses a written src over _micro's", () => {
+    const { container } = render(<Image _micro={MICRO} src={SRC} alt="hero" />);
+
+    expect(container.querySelector("img")!.getAttribute("src")).toContain(encodeURIComponent(SRC));
+  });
+
+  it("uses a written width and height over _micro's", () => {
+    const { container } = render(<Image _micro={MICRO} width={800} height={400} alt="hero" />);
+
+    expect(ratio(container)).toBe("2");
+  });
+
+  it("ignores a lone written width and keeps _micro's ratio", () => {
+    // 800 / 900 would squash a 16:9 image into a near-square box
+    const { container } = render(<Image _micro={MICRO} width={800} alt="hero" />);
+
+    expect(ratio(container)).toBe(String(1600 / 900));
+  });
+
+  it("ignores a lone written height and keeps _micro's ratio", () => {
+    const { container } = render(<Image _micro={MICRO} height={400} alt="hero" />);
+
+    expect(ratio(container)).toBe(String(1600 / 900));
+  });
+
+  it("tries again when _micro points at a different src", () => {
+    const { container, rerender } = render(<Image _micro={MICRO} alt="hero" />);
+
+    act(() => fireEvent.error(container.querySelector("img")!));
+    expect(container.querySelector("img")).toBeNull();
+
+    rerender(<Image _micro={{ ...MICRO, src: "https://example.com/dog.jpg" }} alt="hero" />);
+
+    expect(container.querySelector("img")).not.toBeNull();
+  });
+
+  it("requires src, width and height when there is no _micro", () => {
+    // Type-level only: `npm run typecheck` fails if any of these compile.
+    const assertions = () => {
+      // @ts-expect-error width and height are missing
+      void (<Image src={SRC} alt="" />);
+      // @ts-expect-error height is missing
+      void (<Image src={SRC} width={800} alt="" />);
+      // @ts-expect-error src is missing
+      void (<Image width={800} height={600} alt="" />);
+    };
+
+    expect(assertions).toBeTypeOf("function");
+  });
+});
+
 describe("bug ledger", () => {
   it.fails("BUG-10: first paint should carry a srcset for the preload scanner", () => {
     const { img } = renderImage();

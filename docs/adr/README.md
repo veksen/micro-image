@@ -22,7 +22,7 @@ The consequences — what this makes easy, what it makes hard, what we gave up.>
 
 ## Status lifecycle
 
-- `proposed` — drafted, not yet ratified. **Nine of the ADRs here are proposed.** Six are open
+- `proposed` — drafted, not yet ratified. **Eight of the ADRs here are proposed.** Five are open
   questions from `VISION.md`, each with a suggested default that has not been ratified; 0009,
   0010 and 0011 answer research issues instead. Resolve one before writing code that assumes
   its answer, rather than settling it implicitly.
