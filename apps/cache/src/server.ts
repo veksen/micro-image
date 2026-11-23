@@ -128,9 +128,9 @@ export const supportedMimes = ["image/png", "image/webp", gifMime, "image/jpg", 
 /**
  * Formats `?format=` accepts, mapped to the mime each produces.
  *
- * `auto` is deliberately absent. ADR 0004 reserves "the proxy decides" for
- * `Accept`-header negotiation, so it should mean that when it lands rather
- * than quietly meaning "source format" now.
+ * `auto` is deliberately absent. An absent format already means "negotiate on
+ * `Accept`" (see `negotiateFormat`), so a second spelling would only split the
+ * cache. `original` is the way to opt out of negotiation.
  */
 export const formatMimes: Record<string, string> = {
   jpg: "image/jpeg",
@@ -143,6 +143,54 @@ export const formatMimes: Record<string, string> = {
 
 /** An explicit request for whatever the source already is. */
 export const passthroughFormat = "original";
+
+/**
+ * What `Accept` negotiation may pick, in the order a tie on q breaks. AVIF goes
+ * first because it is the smaller of the two at the quality this proxy encodes.
+ */
+const negotiableFormats = ["avif", "webp"] as const;
+
+/**
+ * The format to encode to when the request named none, read from `Accept`.
+ * Undefined means the client named neither, so the source format stands.
+ *
+ * Only an exact `image/avif` or `image/webp` entry counts. Every engine ends its
+ * image `Accept` with an `image/*` or full wildcard, which formally matches AVIF too
+ * (RFC 9110 §12.5.1), but a wildcard is how curl and old browsers say "anything".
+ * Reading it as a request for AVIF would convert for clients that never asked.
+ * An exact entry is also the most specific range for its type, so its q is the
+ * one §12.5.1 says applies, and `q=0` correctly refuses it.
+ */
+export function negotiateFormat(accept: string | undefined): string | undefined {
+  if (!accept) {
+    return undefined;
+  }
+
+  let best: { rank: number; q: number } | undefined;
+
+  for (const range of accept.split(",")) {
+    const [type, ...params] = range.split(";").map((part) => part.trim().toLowerCase());
+    const rank = negotiableFormats.findIndex((format) => type === `image/${format}`);
+
+    if (rank === -1) {
+      continue;
+    }
+
+    const qParam = params.find((param) => param.startsWith("q="));
+    const q = qParam === undefined ? 1 : Number(qParam.slice(2));
+
+    // q=0 refuses the type, and a malformed q is not a preference at all.
+    if (!(q > 0 && q <= 1)) {
+      continue;
+    }
+
+    if (best === undefined || q > best.q || (q === best.q && rank < best.rank)) {
+      best = { rank, q };
+    }
+  }
+
+  return best === undefined ? undefined : negotiableFormats[best.rank];
+}
 
 export const cacheControl =
   "public, max-age=2592000, stale-while-revalidate=60, stale-if-error=43200, immutable";
@@ -355,7 +403,15 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
       return { error: error.clientMessage };
     }
 
-    const id = buildId(request.query.image, requested);
+    // A request that named no format gets the best one its `Accept` names. The
+    // resolved format replaces the absent one before the id is built, so the
+    // cache and the coalescer both keep an AVIF and a WebP of one source apart.
+    const negotiated = requested.format === undefined;
+    const resolved = negotiated
+      ? { ...requested, format: negotiateFormat(request.headers.accept) }
+      : requested;
+
+    const id = buildId(request.query.image, resolved);
 
     // Every successful response leaves through here, so the caching policy
     // cannot drift between branches again. It previously lived on three of the
@@ -364,6 +420,15 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
     const send = (contentType: string, body: Buffer) => {
       reply.type(contentType).code(200);
       reply.header("Cache-Control", cacheControl);
+
+      // Set on every negotiated response, including the ones whose bytes turned
+      // out not to depend on Accept (an SVG, an animation). The proxy only knows
+      // that after the fetch, and an unneeded Vary costs a shared cache some hit
+      // rate where a missing one serves AVIF to a client that cannot decode it.
+      if (negotiated) {
+        reply.header("Vary", "Accept");
+      }
+
       return body;
     };
 
@@ -422,16 +487,16 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
           return { contentType: upstreamContentType, body: imageBuffer };
         }
 
-        const outputMime = resolveOutputMime(requested.format, upstreamContentType);
+        const outputMime = resolveOutputMime(resolved.format, upstreamContentType);
 
         let compressedBuffer: Buffer;
 
         try {
           compressedBuffer = await compress(imageBuffer, {
             contentType: outputMime,
-            width: requested.width,
-            blur: requested.blur,
-            quality: requested.quality,
+            width: resolved.width,
+            blur: resolved.blur,
+            quality: resolved.quality,
             noOpProfile: probed.noOpProfile,
           });
         } catch (error) {

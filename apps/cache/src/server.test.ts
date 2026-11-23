@@ -4,6 +4,7 @@ import {
   buildServer,
   compress,
   parseCacheOptions,
+  negotiateFormat,
   legacyBlurRadius,
   resolveResponseMime,
   fallbackMime,
@@ -385,6 +386,180 @@ describe("GET /cache — AVIF output", () => {
 
     expect(res.statusCode).toBe(400);
     expect(res.json().supported).toContain("avif");
+  });
+});
+
+/**
+ * The `Accept` headers engines actually send for an `<img>`, from engine source
+ * (`docs/research/image-format-coverage.md` §10).
+ */
+const acceptHeaders = {
+  chromium: "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+  firefox: "image/avif,image/webp,image/png,image/svg+xml,image/*;q=0.8,*/*;q=0.5",
+  safari:
+    "image/webp,image/avif,image/heic,image/heic-sequence,image/png,image/svg+xml,image/*;q=0.8,*/*;q=0.5",
+  safariLockdown: "image/webp,image/png,image/svg+xml,image/*;q=0.8,*/*;q=0.5",
+};
+
+describe("negotiateFormat", () => {
+  it("picks avif for every engine that names it", () => {
+    expect(negotiateFormat(acceptHeaders.chromium)).toBe("avif");
+    expect(negotiateFormat(acceptHeaders.firefox)).toBe("avif");
+    // Safari lists webp first, but both are q=1, and order within a q is not a
+    // preference RFC 9110 recognises.
+    expect(negotiateFormat(acceptHeaders.safari)).toBe("avif");
+  });
+
+  it("falls back to webp for Safari in Lockdown Mode", () => {
+    expect(negotiateFormat(acceptHeaders.safariLockdown)).toBe("webp");
+  });
+
+  it("does not read a wildcard as a request for a modern format", () => {
+    expect(negotiateFormat("*/*")).toBeUndefined();
+    expect(negotiateFormat("image/*")).toBeUndefined();
+    expect(negotiateFormat(undefined)).toBeUndefined();
+    expect(negotiateFormat("")).toBeUndefined();
+  });
+
+  it("honours q values", () => {
+    expect(negotiateFormat("image/avif;q=0.5,image/webp")).toBe("webp");
+    expect(negotiateFormat("image/avif;q=0,image/webp;q=0.1")).toBe("webp");
+    expect(negotiateFormat("image/avif;q=0")).toBeUndefined();
+  });
+
+  it("tolerates case, whitespace and other parameters", () => {
+    expect(negotiateFormat(" Image/AVIF ; Q=0.9 , image/webp;q=0.8")).toBe("avif");
+    expect(negotiateFormat("image/webp;foo=bar")).toBe("webp");
+  });
+
+  it("ignores an entry whose q is malformed", () => {
+    expect(negotiateFormat("image/avif;q=2,image/webp")).toBe("webp");
+    expect(negotiateFormat("image/avif;q=high")).toBeUndefined();
+  });
+
+  it("does not match a type that merely contains a negotiable one", () => {
+    expect(negotiateFormat("image/avif-sequence,image/webpx")).toBeUndefined();
+  });
+});
+
+describe("GET /cache — Accept negotiation (ADR 0004)", () => {
+  const photo = () => makeJpeg({ width: 400, height: 300, quality: 80 });
+
+  function getAccepting(query: Record<string, string>, accept: string) {
+    return server().inject({ method: "GET", url: "/cache", query, headers: { accept } });
+  }
+
+  it("serves avif to a browser that names it", async () => {
+    origin = await startOrigin({ "/cat.jpg": { body: await photo(), contentType: "image/jpeg" } });
+
+    const res = await getAccepting(
+      { image: `${origin.url}/cat.jpg`, width: "200" },
+      acceptHeaders.chromium
+    );
+
+    expect(res.headers["content-type"]).toBe("image/avif");
+    expect(res.headers.vary).toBe("Accept");
+  });
+
+  it("serves webp to a browser that names only webp", async () => {
+    origin = await startOrigin({ "/cat.jpg": { body: await photo(), contentType: "image/jpeg" } });
+
+    const res = await getAccepting(
+      { image: `${origin.url}/cat.jpg`, width: "200" },
+      acceptHeaders.safariLockdown
+    );
+
+    expect(res.headers["content-type"]).toBe("image/webp");
+    expect(res.headers.vary).toBe("Accept");
+  });
+
+  it("keeps the source format for a client that names neither, and still varies", async () => {
+    origin = await startOrigin({ "/cat.jpg": { body: await photo(), contentType: "image/jpeg" } });
+
+    const res = await getAccepting({ image: `${origin.url}/cat.jpg`, width: "200" }, "*/*");
+
+    expect(res.headers["content-type"]).toBe("image/jpeg");
+    // the same url serves avif to Chrome, so a shared cache must key on Accept
+    // here too, or this jpeg would be handed to Chrome and vice versa
+    expect(res.headers.vary).toBe("Accept");
+  });
+
+  it("does not vary when the request named its format", async () => {
+    origin = await startOrigin({ "/cat.jpg": { body: await photo(), contentType: "image/jpeg" } });
+
+    const explicit = await getAccepting(
+      { image: `${origin.url}/cat.jpg`, width: "200", format: "webp" },
+      acceptHeaders.chromium
+    );
+    const original = await getAccepting(
+      { image: `${origin.url}/cat.jpg`, width: "200", format: "original" },
+      acceptHeaders.chromium
+    );
+
+    expect(explicit.headers["content-type"]).toBe("image/webp");
+    expect(explicit.headers.vary).toBeUndefined();
+    expect(original.headers["content-type"]).toBe("image/jpeg");
+    expect(original.headers.vary).toBeUndefined();
+  });
+
+  it("keeps each negotiated format in its own cache entry", async () => {
+    origin = await startOrigin({ "/cat.jpg": { body: await photo(), contentType: "image/jpeg" } });
+    const query = { image: `${origin.url}/cat.jpg`, width: "200" };
+
+    const avif = await getAccepting(query, acceptHeaders.chromium);
+    const webp = await getAccepting(query, acceptHeaders.safariLockdown);
+    const jpeg = await getAccepting(query, "*/*");
+    const avifHit = await getAccepting(query, acceptHeaders.firefox);
+
+    expect([avif, webp, jpeg, avifHit].map((res) => res.headers["content-type"])).toEqual([
+      "image/avif",
+      "image/webp",
+      "image/jpeg",
+      "image/avif",
+    ]);
+    expect(Buffer.compare(avifHit.rawPayload, avif.rawPayload)).toBe(0);
+    expect(origin.hits["/cat.jpg"]).toBe(3);
+  });
+
+  it("does not coalesce concurrent requests that negotiate different formats", async () => {
+    origin = await startOrigin({
+      "/cat.jpg": { body: await photo(), contentType: "image/jpeg", delayMs: 50 },
+    });
+    const query = { image: `${origin.url}/cat.jpg`, width: "200" };
+
+    // in flight together, so a format-blind coalescer key would hand all three
+    // the first one's bytes
+    const [avif, webp, jpeg] = await Promise.all([
+      getAccepting(query, acceptHeaders.chromium),
+      getAccepting(query, acceptHeaders.safariLockdown),
+      getAccepting(query, "*/*"),
+    ]);
+
+    expect(avif.headers["content-type"]).toBe("image/avif");
+    expect(webp.headers["content-type"]).toBe("image/webp");
+    expect(jpeg.headers["content-type"]).toBe("image/jpeg");
+    expect(origin.hits["/cat.jpg"]).toBe(3);
+  });
+
+  it("varies on a cache hit as well as a miss", async () => {
+    origin = await startOrigin({ "/cat.jpg": { body: await photo(), contentType: "image/jpeg" } });
+    const query = { image: `${origin.url}/cat.jpg`, width: "200" };
+
+    await getAccepting(query, acceptHeaders.chromium);
+    const hit = await getAccepting(query, acceptHeaders.chromium);
+
+    expect(origin.hits["/cat.jpg"]).toBe(1);
+    expect(hit.headers.vary).toBe("Accept");
+  });
+
+  it("still relays an animation untouched to a browser that accepts avif", async () => {
+    const gif = makeLoopingGif({ frames: 3 });
+    origin = await startOrigin({ "/anim.gif": { body: gif, contentType: "image/gif" } });
+
+    const res = await getAccepting({ image: `${origin.url}/anim.gif` }, acceptHeaders.chromium);
+
+    expect(res.headers["content-type"]).toBe("image/gif");
+    expect(Buffer.compare(res.rawPayload, gif)).toBe(0);
   });
 });
 
