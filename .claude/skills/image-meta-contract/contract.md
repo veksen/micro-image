@@ -35,14 +35,13 @@ is the failure mode this contract exists to prevent.
   phantom `2400w` for a 900px image asks the browser to download an upscale.
 - **`width`/`height` are intrinsic pixels**, not rendered size. They exist to reserve layout
   space and prevent CLS, via `aspect-ratio` — not to select a variant.
-- **`sizes` ships in the first paint, and the observer refines it.** The build knows the
-  image; a `ResizeObserver` knows the container. A lazy image uses `sizes="auto"`, which picks
-  from the container width after layout with no guess. An eager (above-the-fold) image cannot
-  wait for layout, so the build bakes an initial `sizes` and the observer corrects it.
-  Browsers upgrade a candidate on resize but never downgrade, so a bake that is too large
-  costs bytes the observer cannot take back. `sizes="auto"` alone is never the mechanism for
-  an eager image: it requires `loading="lazy"`. See `VISION.md` § How container-width
-  selection works.
+- **`sizes` ships in the first paint.** A lazy image uses `sizes="auto"`, which picks from
+  the container width after layout with no guess. An eager (above-the-fold) image cannot wait
+  for layout, so it needs a `sizes` that matches its layout, baked at build or written by the
+  developer. An observer may raise `sizes` but never lower it: a lowered `sizes` recovers no
+  bytes, and in Chromium it adds a second fetch while the large candidate is still
+  downloading. `sizes="auto"` alone is never the mechanism for an eager image: it requires
+  `loading="lazy"`. See `VISION.md` § How container-width selection works.
 - **`placeholder` is optional and always inline.** If producing it costs a network request at
   runtime, don't produce it — the round trip is worse than no placeholder.
 

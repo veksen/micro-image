@@ -27,8 +27,9 @@ the PR before it merges.
 rather than pretend it away):
 
 - **Nothing in the critical path.** `srcset` and a real `sizes` ship in the first paint, so
-  the preload scanner starts the image before any JS runs. A `ResizeObserver` may refine
-  `sizes`; it never bootstraps it. `sizes="auto"` alone is not the mechanism: it needs
+  the preload scanner starts the image before any JS runs. A `ResizeObserver` may raise
+  `sizes`, never lower it: lowering recovers no bytes, and while the large variant is still
+  downloading it adds a second fetch. `sizes="auto"` alone is not the mechanism: it needs
   `loading="lazy"`, which is wrong for the hero image. A feature that adds a round trip
   states why in its PR.
 - **One contract, many paths.** Build-time, runtime, and no-proxy all produce the same
