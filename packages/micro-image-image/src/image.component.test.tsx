@@ -6,6 +6,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { render, act, cleanup, fireEvent } from "@testing-library/react";
 import { renderToString } from "react-dom/server";
 import Image from "./image.component";
+import { ImageCacheProvider } from "./image-cache-provider";
 import { FakeImage, FakeResizeObserver, installDomStubs } from "./test-helpers";
 
 const SRC = "https://example.com/cat.jpg";
@@ -137,7 +138,32 @@ describe("Image — first paint", () => {
   it("puts the requested width into each srcset candidate url", () => {
     const { img } = renderImage();
 
-    expect(img()!.srcset).toContain("width=100&quality=75");
+    expect(img()!.srcset).toContain("?image=https%3A%2F%2Fexample.com%2Fcat.jpg&width=100 100w");
+  });
+
+  it("leaves quality out of the urls so the proxy picks it per format", () => {
+    const { img } = renderImage();
+
+    expect(img()!.srcset).not.toContain("quality=");
+  });
+
+  it("sends a quality the caller sets", () => {
+    const { img } = renderImage({ generatorOptions: { quality: 60 } });
+
+    expect(img()!.srcset).toContain("width=100&quality=60 100w");
+  });
+
+  it.each([
+    ["ipx", "quality_75"],
+    ["imgproxy", "/q:75/"],
+  ] as const)("still sends quality 75 to %s when the caller sets none", (provider, expected) => {
+    const { container } = render(
+      <ImageCacheProvider provider={provider} cacheProxyUrl={PROXY}>
+        <Image src={SRC} width={800} height={600} alt="a cat" />
+      </ImageCacheProvider>
+    );
+
+    expect(container.querySelector("img")!.srcset).toContain(expected);
   });
 
   it("loads lazily by default and lets the browser size it with auto", () => {

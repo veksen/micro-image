@@ -2,8 +2,13 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useImageCacheConfig } from "./image-cache-provider";
 import { IProviderOptions } from "./providers/base";
 
-/** Used when the caller does not ask for a quality of its own. */
-const defaultQuality = 75;
+/**
+ * Sent for ipx and imgproxy when the caller sets no quality. The micro-image
+ * proxy gets none, because it picks a quality per negotiated format (50 for
+ * AVIF, 75 otherwise). Whether the other two should defer to their own
+ * defaults is an open question: #90.
+ */
+const thirdPartyDefaultQuality = 75;
 
 /**
  * `auto` sizes a lazy image from its own laid-out width. A browser without
@@ -49,10 +54,6 @@ const generateSrcSet = ({
   return ladderWidths(intrinsicWidth)
     .map((width) => {
       const url = generator({
-        // `quality` leads the spread so a caller's own value wins. It used to
-        // trail it, which meant generatorOptions.quality was accepted and then
-        // silently overwritten with the default.
-        quality: defaultQuality,
         ...defaultGeneratorOptions,
         url: cacheProxyUrl,
         src: baseSrc,
@@ -163,6 +164,7 @@ function Image<GeneratorOptions extends IProviderOptions = IProviderOptions>(
       cacheProxyUrl: config.cacheProxyUrl,
       generator: config.generateUrl,
       defaultGeneratorOptions: {
+        ...(config.provider === "micro-image" ? {} : { quality: thirdPartyDefaultQuality }),
         ...config.defaultGeneratorOptions,
         ...props.generatorOptions,
       },
@@ -171,6 +173,7 @@ function Image<GeneratorOptions extends IProviderOptions = IProviderOptions>(
     src,
     intrinsicWidth,
     props.generatorOptions,
+    config.provider,
     config.cacheProxyUrl,
     config.generateUrl,
     config.defaultGeneratorOptions,
