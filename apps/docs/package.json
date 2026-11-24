@@ -6,6 +6,7 @@
     "build": "next build",
     "start": "next start",
     "benchmark": "vite-node bench/run.ts",
+    "benchmark:compare": "vite-node bench/compare.ts",
     "dev": "next dev -p 3002",
     "typecheck": "tsc --noEmit",
     "clean": "rm -rf .turbo && rm -rf node_modules && rm -rf .next",

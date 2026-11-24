@@ -16,11 +16,18 @@
  * BENCH_LAYOUTS, BENCH_STRATEGIES and BENCH_VIEWPORTS take comma-separated names
  * to narrow a run. BENCH_RUNS sets the measured loads per cell (3). BENCH_HAR=1
  * writes a HAR of each cell's first measured load. BENCH_THROTTLE=off drops the
- * network throttling.
+ * network throttling. BENCH_OUT moves the output directory. BENCH_CHROMIUM is a
+ * Chromium binary to use instead of the one playwright-core expects.
+ *
+ * BENCH_APP_ROOT is another checkout of this repo, already built, whose proxy and
+ * docs app are measured instead of this one's. CI uses it to measure the base
+ * branch with the PR's harness, so a difference between the two results comes
+ * from the apps and never from the measuring code.
  */
 import { spawn, type ChildProcess } from "child_process";
-import { copyFileSync, existsSync, mkdirSync, rmSync, writeFileSync } from "fs";
-import { join } from "path";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "fs";
+import { createServer } from "http";
+import { join, resolve } from "path";
 import { chromium, type Browser, type Page } from "playwright-core";
 import {
   type ImageFetch,
@@ -35,16 +42,23 @@ import {
   parseImageFetch,
   strategyNames,
 } from "../src/bench/model";
+import type { BenchImage, BenchResults, Phase } from "../src/bench/compare";
 
-const DOCS = join(__dirname, "..");
-const CACHE = join(DOCS, "..", "cache");
+const APP = resolve(process.env.BENCH_APP_ROOT ?? join(__dirname, "..", "..", ".."));
+const DOCS = join(APP, "apps", "docs");
+const CACHE = join(APP, "apps", "cache");
 const FIXTURES = join(DOCS, "public", "bench");
-const SOURCE = join(DOCS, "public", "neom-bA32w6lebJg-unsplash.jpg");
-const OUT = join(__dirname, "results");
+const SOURCE = join(__dirname, "..", "public", "neom-bA32w6lebJg-unsplash.jpg");
+const OUT = resolve(process.env.BENCH_OUT ?? join(__dirname, "results"));
 
 const HOST = "127.0.0.1";
-/** Serves the fixtures, and is the one origin the proxy is told to trust. */
+/** Serves the docs app, and the fixtures to the `next-image` row. */
 const ORIGIN = `http://${HOST}:3100`;
+/**
+ * Serves the fixtures to the proxy, and is the one origin the proxy is told to
+ * trust. It is a separate server so the runner can count what the proxy fetches.
+ */
+const FIXTURE_ORIGIN = `http://${HOST}:3101`;
 // the proxy binds `localhost` (apps/cache/src/index.ts)
 const PROXY_ROOT = "http://localhost:4100";
 const PROXY = `${PROXY_ROOT}/cache`;
@@ -101,8 +115,8 @@ async function main() {
   ) {
     throw new Error("build first: npm run build");
   }
-  // a server left on either port would answer and be measured instead
-  for (const url of [ORIGIN, PROXY_ROOT]) {
+  // a server left on any of the ports would answer and be measured instead
+  for (const url of [ORIGIN, FIXTURE_ORIGIN, PROXY_ROOT]) {
     if (await isUp(url)) throw new Error(`${url} is already in use`);
   }
 
@@ -115,37 +129,70 @@ async function main() {
     copyFileSync(SOURCE, join(FIXTURES, `small-${index}.jpg`));
   }
 
+  const fixtureServer = serveFixtures();
   const children = [
-    start("proxy", ["dist/index.js"], CACHE, { PORT: "4100", TRUSTED_ORIGINS: ORIGIN }),
+    start("proxy", ["dist/index.js"], CACHE, { PORT: "4100", TRUSTED_ORIGINS: FIXTURE_ORIGIN }),
     start(
       "docs",
-      [require.resolve("next/dist/bin/next"), "start", "-H", HOST, "-p", "3100"],
+      [require.resolve("next/dist/bin/next", { paths: [DOCS] }), "start", "-H", HOST, "-p", "3100"],
       DOCS,
-      { NODE_ENV: "production", BENCH_ORIGIN: ORIGIN, BENCH_PROXY_URL: PROXY }
+      { NODE_ENV: "production", BENCH_ORIGIN: FIXTURE_ORIGIN, BENCH_PROXY_URL: PROXY }
     ),
   ];
   try {
     await waitFor(PROXY_ROOT);
     await waitFor(ORIGIN);
     await cutSmallFixtures();
-    const { cells, failures, retries } = await measureAll();
+    const { cells, failures, missing, retries } = await measureAll();
 
     mkdirSync(OUT, { recursive: true });
-    writeFileSync(
-      join(OUT, "results.json"),
-      JSON.stringify({ throttle: THROTTLE, runs: RUNS, retries, cells, failures }, null, 2)
-    );
+    const results: BenchResults = {
+      throttle: THROTTLE,
+      runs: RUNS,
+      retries,
+      cells,
+      failures,
+      missing,
+    };
+    writeFileSync(join(OUT, "results.json"), JSON.stringify(results, null, 2));
     writeFileSync(join(OUT, "results.md"), markdown(cells, failures));
     console.log(`wrote ${join(OUT, "results.md")}`);
   } finally {
     children.forEach((child) => child.kill());
+    fixtureServer.close();
   }
 }
 
+/** Requests the proxy made to the fixture origin, by image index. Reset per load. */
+const upstreamFetches = new Map<number, number>();
+
+/**
+ * Serves `public/bench` and counts each request by the image it names, so a load
+ * can report how often the proxy went upstream instead of answering from its cache.
+ */
+function serveFixtures() {
+  const server = createServer((request, response) => {
+    const match = /^\/bench\/((?:large|small)-(\d+)\.jpg)$/.exec(request.url ?? "");
+    if (match === null) {
+      response.writeHead(404).end();
+      return;
+    }
+    const index = Number(match[2]);
+    upstreamFetches.set(index, (upstreamFetches.get(index) ?? 0) + 1);
+    response
+      .writeHead(200, { "Content-Type": "image/jpeg" })
+      .end(readFileSync(join(FIXTURES, match[1])));
+  });
+  server.listen(3101, HOST);
+  return server;
+}
+
 async function measureAll() {
-  const browser = await chromium.launch();
+  const browser = await chromium.launch({ executablePath: process.env.BENCH_CHROMIUM });
   const cells: Cell[] = [];
   const failures: string[] = [];
+  /** Cells this build has no page for: a base branch that predates a strategy. */
+  const missing: string[] = [];
   let retries = 0;
   try {
     for (const layout of layoutsToRun) {
@@ -159,6 +206,11 @@ async function measureAll() {
             cells.push(cell);
             console.log(`${name}: ${describe(cell)}`);
           } catch (error) {
+            if (error instanceof NoSuchPage) {
+              missing.push(name);
+              console.log(`${name}: not on this build`);
+              continue;
+            }
             // one broken cell shouldn't cost the rest of the matrix
             failures.push(`${name}: ${(error as Error).message.split("\n")[0]}`);
             console.error(failures.at(-1));
@@ -169,8 +221,10 @@ async function measureAll() {
   } finally {
     await browser.close();
   }
-  return { cells, failures, retries };
+  return { cells, failures, missing, retries };
 }
+
+class NoSuchPage extends Error {}
 
 function start(name: string, args: string[], cwd: string, env: NodeJS.ProcessEnv): ChildProcess {
   const child = spawn("node", args, {
@@ -203,12 +257,12 @@ async function waitFor(url: string) {
  * fixture origin stops the run here, not as a table of failed images.
  */
 async function cutSmallFixtures() {
-  const source = `${ORIGIN}/bench/large-0.jpg`;
+  const source = `${FIXTURE_ORIGIN}/bench/large-0.jpg`;
   const response = await fetch(
     `${PROXY}?image=${encodeURIComponent(source)}&width=${fixtures.small.width}&format=jpeg&quality=90`
   );
   if (response.status === 403) {
-    throw new Error(`the proxy refused ${ORIGIN}; it has to be listed in TRUSTED_ORIGINS`);
+    throw new Error(`the proxy refused ${FIXTURE_ORIGIN}; it has to be listed in TRUSTED_ORIGINS`);
   }
   if (!response.ok || !response.headers.get("content-type")?.startsWith("image/")) {
     throw new Error(
@@ -255,10 +309,13 @@ interface Fetch extends ImageFetch {
   bytes: number;
   /** ms from the document request until the response finished. */
   finishedMs: number | undefined;
+  phase: Phase;
+  /** The proxy's response carried a Cache-Control header. */
+  cacheControl: boolean;
 }
 
 interface Load {
-  images: Array<{ index: number; neededWidth: number; fetches: Fetch[] }>;
+  images: Array<{ index: number; neededWidth: number; fetches: Fetch[]; upstream: number }>;
   lcp: number | undefined;
   cls: number;
 }
@@ -287,11 +344,34 @@ async function load(
   }
   // CDP timestamps are monotonic seconds; the document request is time zero
   let navigationStart = 0;
+  let scrolled = false;
   const fetches = new Map<string, Fetch>();
-  cdp.on("Network.requestWillBeSent", ({ requestId, request, timestamp, type }) => {
+  cdp.on("Network.requestWillBeSent", ({ requestId, request, timestamp, type, initiator }) => {
     if (type === "Document" && navigationStart === 0) navigationStart = timestamp;
     const parsed = parseImageFetch(request.url);
-    if (parsed) fetches.set(requestId, { ...parsed, bytes: 0, finishedMs: undefined });
+    if (!parsed) return;
+    // The phase is when the request could start, which a clock on a shared
+    // machine can't say reproducibly: the parser found it in the HTML (an <img>
+    // or a preload link), a script set it after hydration, or the scroll did.
+    const phase: Phase = scrolled
+      ? "scroll"
+      : initiator.type === "parser" || initiator.type === "preload"
+        ? "html"
+        : "script";
+    fetches.set(requestId, {
+      ...parsed,
+      bytes: 0,
+      finishedMs: undefined,
+      phase,
+      cacheControl: false,
+    });
+  });
+  cdp.on("Network.responseReceived", ({ requestId, response }) => {
+    const fetch = fetches.get(requestId);
+    if (!fetch) return;
+    fetch.cacheControl = Object.keys(response.headers).some(
+      (name) => name.toLowerCase() === "cache-control"
+    );
   });
   cdp.on("Network.loadingFinished", ({ requestId, encodedDataLength, timestamp }) => {
     const fetch = fetches.get(requestId);
@@ -300,10 +380,16 @@ async function load(
     fetch.finishedMs = Math.round((timestamp - navigationStart) * 1000);
   });
 
-  await page.goto(url, { waitUntil: "networkidle" });
+  upstreamFetches.clear();
+  const response = await page.goto(url, { waitUntil: "networkidle" });
+  if (response?.status() === 404) {
+    await context.close();
+    throw new NoSuchPage();
+  }
   // before scrolling, which ends LCP and would add the lazy images to it
   const { lcp, cls } = await paintMetrics(page);
 
+  scrolled = true;
   await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
   await page.waitForLoadState("networkidle");
   // lazy images that start after the scroll make networkidle fire early
@@ -322,7 +408,11 @@ async function load(
 
   const all = [...fetches.values()];
   return {
-    images: boxes.map((box) => ({ ...box, fetches: all.filter((f) => f.index === box.index) })),
+    images: boxes.map((box) => ({
+      ...box,
+      fetches: all.filter((f) => f.index === box.index),
+      upstream: upstreamFetches.get(box.index) ?? 0,
+    })),
     lcp,
     cls,
   };
@@ -378,6 +468,8 @@ interface Cell {
   cls: number;
   /** Fetches differed between runs, so the cell's numbers are not the markup's alone. */
   unstable: boolean;
+  /** Every image of the first measured load, for the CI comparison. */
+  images: BenchImage[];
 }
 
 /** The fetch left on screen: the last one that isn't the shipped component's placeholder. */
@@ -433,6 +525,19 @@ function summarize(
     lcp: spread(loads.map((load) => load.lcp)),
     cls: Math.max(...loads.map((load) => load.cls)),
     unstable: loads.some((load) => widths(load) !== widths(first)),
+    images: first.images.map((image) => ({
+      index: image.index,
+      neededWidth: image.neededWidth,
+      fit: fit(image),
+      upstream: image.upstream,
+      fetches: image.fetches.map((f) => ({
+        width: f.width,
+        placeholder: f.placeholder,
+        kb: f.bytes / 1024,
+        phase: f.phase,
+        cacheControl: f.cacheControl,
+      })),
+    })),
   };
 }
 

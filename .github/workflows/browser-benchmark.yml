@@ -1,0 +1,158 @@
+name: Browser benchmark
+
+# Loads the docs app's bench page in Chromium against the built proxy, once for
+# the base branch and once for the PR, and fails when the PR makes a page fetch
+# more bytes, more requests, a blurrier image, start the eager image later, or
+# go upstream more often. Every number it gates on depends on the markup, the
+# proxy and the pinned Chromium and sharp, not on the runner. Timings are left
+# out for that reason; the proxy Benchmark workflow reports them.
+
+on:
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+
+env:
+  # The rows CI gates on. A PR that adds a strategy the component ships adds it here.
+  BENCH_STRATEGIES: shipped
+  BENCH_LAYOUTS: full,column,grid,thumb
+  BENCH_VIEWPORTS: 375@3,1280@2,1920@1
+  # widths and bytes match across loads, so one per cell is enough
+  BENCH_RUNS: 1
+  BENCH_HAR: 1
+
+jobs:
+  browser-benchmark:
+    name: Browser benchmark
+    # Pinned, not ubuntu-latest: playwright-core 1.56.1 can't install Chromium on
+    # ubuntu 26.04, and a fixed image keeps the system libraries Chromium renders
+    # with from moving under the comparison.
+    runs-on: ubuntu-24.04
+    steps:
+      # The PR side is the merge commit, and the base side is its first parent,
+      # so the difference between them is exactly what merging would change.
+      - name: Checkout PR
+        uses: actions/checkout@v7
+        with:
+          path: head
+          fetch-depth: 2
+
+      - name: Find base commit
+        id: base
+        run: echo "sha=$(git -C head rev-parse HEAD^1)" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout base
+        uses: actions/checkout@v7
+        with:
+          path: base
+          ref: ${{ steps.base.outputs.sha }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: head/.nvmrc
+          cache: npm
+          cache-dependency-path: |
+            head/package-lock.json
+            base/package-lock.json
+
+      - name: Install and build base
+        working-directory: base
+        run: |
+          npm ci
+          npx turbo run build --filter=@micro-image/docs... --filter=micro-image-cache
+
+      - name: Install and build PR
+        working-directory: head
+        run: |
+          npm ci
+          npx turbo run build --filter=@micro-image/docs... --filter=micro-image-cache
+
+      # The Chromium build the PR's playwright-core expects. Both sides run in it.
+      - name: Install Chromium
+        working-directory: head/apps/docs
+        run: npx playwright-core install --with-deps chromium
+
+      # The PR's harness measures both sides, so a change to the harness moves
+      # base and PR together and never reads as a regression.
+      - name: Measure base
+        working-directory: head/apps/docs
+        env:
+          BENCH_APP_ROOT: ${{ github.workspace }}/base
+          BENCH_OUT: ${{ runner.temp }}/bench/base
+        run: npm run benchmark
+
+      - name: Measure PR
+        working-directory: head/apps/docs
+        env:
+          BENCH_OUT: ${{ runner.temp }}/bench/head
+        run: npm run benchmark
+
+      # Doesn't fail here, so the comment still goes out; the last step fails.
+      - name: Compare
+        id: compare
+        working-directory: head/apps/docs
+        env:
+          BENCH: ${{ runner.temp }}/bench
+        run: |
+          if npm run --silent benchmark:compare -- \
+            "$BENCH/base/results.json" "$BENCH/head/results.json" "$BENCH/comparison.md"; then
+            echo "regressed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "regressed=true" >> "$GITHUB_OUTPUT"
+          fi
+          cat "$BENCH/comparison.md" >> "$GITHUB_STEP_SUMMARY" || true
+
+      # One comment per PR, edited in place, as in benchmark.yml. Fork PRs get a
+      # read-only token, so the comment is skipped there; the job summary and
+      # the artifact still carry the numbers.
+      - name: Comment results
+        if: >
+          always() && steps.compare.outcome == 'success' &&
+          github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ github.event.pull_request.number }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          BENCH: ${{ runner.temp }}/bench
+        run: |
+          MARKER='<!-- micro-image-browser-benchmark -->'
+          BODY_FILE=$(mktemp)
+          {
+            printf '%s\n' "$MARKER"
+            cat "$BENCH/comparison.md"
+            printf '\n_Posted by the Browser benchmark workflow. Per-image results and a HAR '
+            printf 'of every cell are in the [run artifact](%s)._\n' "$RUN_URL"
+          } > "$BODY_FILE"
+
+          # --paginate: on a busy PR the marker falls off the first page of 30
+          EXISTING=$(gh api --paginate "repos/${GITHUB_REPOSITORY}/issues/${PR}/comments" \
+            --jq ".[] | select(.body | startswith(\"${MARKER}\")) | .id" | head -n 1)
+
+          if [ -n "$EXISTING" ]; then
+            gh api --method PATCH "repos/${GITHUB_REPOSITORY}/issues/comments/${EXISTING}" \
+              -F body=@"$BODY_FILE" --silent
+          else
+            gh api --method POST "repos/${GITHUB_REPOSITORY}/issues/${PR}/comments" \
+              -F body=@"$BODY_FILE" --silent
+          fi
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: browser-benchmark
+          path: ${{ runner.temp }}/bench
+          if-no-files-found: warn
+
+      - name: Fail on regression
+        if: steps.compare.outputs.regressed == 'true'
+        run: |
+          echo "the PR regressed at least one cell; see the comparison above" >&2
+          exit 1
