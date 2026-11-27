@@ -219,6 +219,25 @@ describe("GET /cache — happy path", () => {
     expect(Buffer.compare(res.rawPayload, expected)).toBe(0);
   });
 
+  it("encodes jpeg with mozjpeg but without its scan optimisation", async () => {
+    const jpeg = await makeJpeg({ width: 400, height: 300, quality: 80 });
+    origin = await startOrigin({ "/cat.jpg": { body: jpeg, contentType: "image/jpeg" } });
+
+    const res = await get({ image: `${origin.url}/cat.jpg`, width: "200" });
+
+    // Rebuilt rather than reusing `compress`, as in the png test above.
+    const sharp = (await import("sharp")).default;
+    const resized = sharp(jpeg).resize({ width: 200, withoutEnlargement: true });
+    const expected = await resized
+      .clone()
+      .jpeg({ mozjpeg: true, optimiseScans: false, quality: 75 })
+      .toBuffer();
+    const optimised = await resized.clone().jpeg({ mozjpeg: true, quality: 75 }).toBuffer();
+
+    expect(Buffer.compare(expected, optimised)).not.toBe(0);
+    expect(Buffer.compare(res.rawPayload, expected)).toBe(0);
+  });
+
   it("serves the second request for the same key from memory", async () => {
     const jpeg = await makeJpeg({ width: 400, height: 300, quality: 80 });
     origin = await startOrigin({ "/cat.jpg": { body: jpeg, contentType: "image/jpeg" } });

@@ -321,7 +321,12 @@ export function imageFromMime(image: sharp.Sharp, mime?: string, quality?: numbe
     case "image/jpg":
     case "image/jpeg":
     default:
-      return image.jpeg({ mozjpeg: true, quality: effectiveQuality });
+      // mozjpeg's scan optimisation searches progressive scan layouts for the
+      // smallest file. It leaves the pixels untouched and costs about a fifth of
+      // the encode. Measured on linux-x64, resize then encode at quality 75: the
+      // example-vite portrait at 400w 58.5 -> 44.3 ms of CPU for 28,560 ->
+      // 28,801 bytes (+0.8%), the hero at 1200w 180 -> 150 ms for +1.1%.
+      return image.jpeg({ mozjpeg: true, optimiseScans: false, quality: effectiveQuality });
   }
 }
 
