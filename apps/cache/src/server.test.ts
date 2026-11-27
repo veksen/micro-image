@@ -202,6 +202,23 @@ describe("GET /cache — happy path", () => {
     expect(res.rawPayload.byteLength).toBeLessThanOrEqual(png.byteLength);
   });
 
+  it("encodes png output with adaptive filtering", async () => {
+    const png = await makePng({ width: 400, height: 300 });
+    origin = await startOrigin({ "/cat.png": { body: png, contentType: "image/png" } });
+
+    const res = await get({ image: `${origin.url}/cat.png`, width: "200" });
+
+    // Rebuilt rather than reusing `compress`, so the test does not assert the
+    // code under test against itself. Without the option the bytes differ.
+    const sharp = (await import("sharp")).default;
+    const resized = sharp(png).resize({ width: 200, withoutEnlargement: true });
+    const expected = await resized.clone().png({ adaptiveFiltering: true }).toBuffer();
+    const unfiltered = await resized.clone().png().toBuffer();
+
+    expect(Buffer.compare(expected, unfiltered)).not.toBe(0);
+    expect(Buffer.compare(res.rawPayload, expected)).toBe(0);
+  });
+
   it("serves the second request for the same key from memory", async () => {
     const jpeg = await makeJpeg({ width: 400, height: 300, quality: 80 });
     origin = await startOrigin({ "/cat.jpg": { body: jpeg, contentType: "image/jpeg" } });

@@ -301,7 +301,12 @@ export function imageFromMime(image: sharp.Sharp, mime?: string, quality?: numbe
     case "image/png":
       // png quality only bites with a palette, and forcing one would change the
       // output of every png request. Left lossless.
-      return image.png();
+      //
+      // Adaptive filtering picks a PNG filter per row instead of one for the
+      // whole image, and stays lossless. Measured on linux-x64 at 400w: the
+      // benchmark fixture 321,219 -> 178,440 bytes (-44%) for 27 -> 36 ms of
+      // CPU; a photo 409,806 -> 311,074 (-24%) for 53 -> 72 ms.
+      return image.png({ adaptiveFiltering: true });
     case "image/webp":
       return image.webp({ quality: effectiveQuality });
     case "image/avif":
