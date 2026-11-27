@@ -1,3 +1,4 @@
+import sharp from "sharp";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import type { FastifyInstance } from "fastify";
 import {
@@ -13,7 +14,7 @@ import {
   avifChromaSubsampling,
 } from "./server";
 import { MAX_REDIRECTS } from "./upstream-guard";
-import { clearCache } from "./cache";
+import { clearCache, setSourceCacheMaxBytes, sourceCacheBytes } from "./cache";
 import {
   makeAnimatedWebp,
   makeApng,
@@ -32,7 +33,17 @@ let origin: Origin | undefined;
 
 beforeEach(() => {
   clearCache();
+  setSourceCacheMaxBytes();
 });
+
+/**
+ * Turns the source cache off, so origin hits count response-cache misses again.
+ * Tests about the response-cache key use it: with originals held, a second
+ * variant of one source makes no upstream request whatever its key.
+ */
+function countResponseMisses() {
+  setSourceCacheMaxBytes(0);
+}
 
 afterEach(async () => {
   await app?.close();
@@ -191,6 +202,42 @@ describe("GET /cache — happy path", () => {
     expect(res.rawPayload.byteLength).toBeLessThanOrEqual(png.byteLength);
   });
 
+  it("encodes png output with adaptive filtering", async () => {
+    const png = await makePng({ width: 400, height: 300 });
+    origin = await startOrigin({ "/cat.png": { body: png, contentType: "image/png" } });
+
+    const res = await get({ image: `${origin.url}/cat.png`, width: "200" });
+
+    // Rebuilt rather than reusing `compress`, so the test does not assert the
+    // code under test against itself. Without the option the bytes differ.
+    const sharp = (await import("sharp")).default;
+    const resized = sharp(png).resize({ width: 200, withoutEnlargement: true });
+    const expected = await resized.clone().png({ adaptiveFiltering: true }).toBuffer();
+    const unfiltered = await resized.clone().png().toBuffer();
+
+    expect(Buffer.compare(expected, unfiltered)).not.toBe(0);
+    expect(Buffer.compare(res.rawPayload, expected)).toBe(0);
+  });
+
+  it("encodes jpeg with mozjpeg but without its scan optimisation", async () => {
+    const jpeg = await makeJpeg({ width: 400, height: 300, quality: 80 });
+    origin = await startOrigin({ "/cat.jpg": { body: jpeg, contentType: "image/jpeg" } });
+
+    const res = await get({ image: `${origin.url}/cat.jpg`, width: "200" });
+
+    // Rebuilt rather than reusing `compress`, as in the png test above.
+    const sharp = (await import("sharp")).default;
+    const resized = sharp(jpeg).resize({ width: 200, withoutEnlargement: true });
+    const expected = await resized
+      .clone()
+      .jpeg({ mozjpeg: true, optimiseScans: false, quality: 75 })
+      .toBuffer();
+    const optimised = await resized.clone().jpeg({ mozjpeg: true, quality: 75 }).toBuffer();
+
+    expect(Buffer.compare(expected, optimised)).not.toBe(0);
+    expect(Buffer.compare(res.rawPayload, expected)).toBe(0);
+  });
+
   it("serves the second request for the same key from memory", async () => {
     const jpeg = await makeJpeg({ width: 400, height: 300, quality: 80 });
     origin = await startOrigin({ "/cat.jpg": { body: jpeg, contentType: "image/jpeg" } });
@@ -202,6 +249,7 @@ describe("GET /cache — happy path", () => {
   });
 
   it("treats a different width as a different cache key", async () => {
+    countResponseMisses();
     const jpeg = await makeJpeg({ width: 400, height: 300, quality: 80 });
     origin = await startOrigin({ "/cat.jpg": { body: jpeg, contentType: "image/jpeg" } });
 
@@ -223,6 +271,7 @@ describe("GET /cache — happy path", () => {
 
 describe("GET /cache — transform parameters [BUG-3, BUG-4, BUG-2]", () => {
   it("keys on ?quality= and applies it", async () => {
+    countResponseMisses();
     const jpeg = await makeJpeg({ width: 400, height: 300, quality: 80 });
     origin = await startOrigin({ "/cat.jpg": { body: jpeg, contentType: "image/jpeg" } });
 
@@ -325,7 +374,7 @@ describe("GET /cache — AVIF output", () => {
     expect(meta.compression).toBe("av1");
   });
 
-  it("encodes at quality 50, effort 4, 4:2:0 when the request asks for no quality", async () => {
+  it("encodes at quality 50, effort 3, 4:2:0 when the request asks for no quality", async () => {
     const jpeg = await photo();
     origin = await startOrigin({ "/cat.jpg": { body: jpeg, contentType: "image/jpeg" } });
 
@@ -333,8 +382,8 @@ describe("GET /cache — AVIF output", () => {
 
     // Byte-compared against the settings this pins rather than asserted loosely.
     // The alternatives are not merely worse: quality 75 is LARGER than the jpeg
-    // the proxy would otherwise have served, and effort 0/2 are larger than
-    // effort 4. A size assertion would pass on any of them.
+    // the proxy would otherwise have served, and effort 2 is larger than
+    // effort 3. A size assertion would pass on any of them.
     //
     // The pipeline is rebuilt here rather than reusing `compress`, so the test
     // does not assert the code under test against itself. That makes it a
@@ -349,7 +398,7 @@ describe("GET /cache — AVIF output", () => {
       .toBuffer();
 
     expect(avifQuality).toBe(50);
-    expect(avifEffort).toBe(4);
+    expect(avifEffort).toBe(3);
     expect(avifChromaSubsampling).toBe("4:2:0");
     expect(Buffer.compare(res.rawPayload, expected)).toBe(0);
   });
@@ -505,6 +554,7 @@ describe("GET /cache — Accept negotiation (ADR 0004)", () => {
   });
 
   it("keeps each negotiated format in its own cache entry", async () => {
+    countResponseMisses();
     origin = await startOrigin({ "/cat.jpg": { body: await photo(), contentType: "image/jpeg" } });
     const query = { image: `${origin.url}/cat.jpg`, width: "200" };
 
@@ -530,7 +580,7 @@ describe("GET /cache — Accept negotiation (ADR 0004)", () => {
     const query = { image: `${origin.url}/cat.jpg`, width: "200" };
 
     // in flight together, so a format-blind coalescer key would hand all three
-    // the first one's bytes
+    // the first one's bytes. The download is shared; the transforms are not.
     const [avif, webp, jpeg] = await Promise.all([
       getAccepting(query, acceptHeaders.chromium),
       getAccepting(query, acceptHeaders.safariLockdown),
@@ -540,7 +590,7 @@ describe("GET /cache — Accept negotiation (ADR 0004)", () => {
     expect(avif.headers["content-type"]).toBe("image/avif");
     expect(webp.headers["content-type"]).toBe("image/webp");
     expect(jpeg.headers["content-type"]).toBe("image/jpeg");
-    expect(origin.hits["/cat.jpg"]).toBe(3);
+    expect(origin.hits["/cat.jpg"]).toBe(1);
   });
 
   it("varies on a cache hit as well as a miss", async () => {
@@ -738,6 +788,73 @@ describe("GET /cache — animation handling, end to end [BUG-18, #52]", () => {
  * payload reaches sharp.
  */
 const UNDECODABLE = Buffer.alloc(64);
+
+describe("GET /cache — source cache", () => {
+  const widthOf = async (body: Buffer) => (await sharp(body).metadata()).width;
+
+  it("serves a second width from the held original", async () => {
+    const jpeg = await makeJpeg({ width: 400, height: 300, quality: 80 });
+    origin = await startOrigin({ "/cat.jpg": { body: jpeg, contentType: "image/jpeg" } });
+
+    const a = await get({ image: `${origin.url}/cat.jpg`, width: "200" });
+    const b = await get({ image: `${origin.url}/cat.jpg`, width: "300" });
+
+    expect(origin.hits["/cat.jpg"]).toBe(1);
+    expect(await widthOf(a.rawPayload)).toBe(200);
+    expect(await widthOf(b.rawPayload)).toBe(300);
+  });
+
+  it("shares one download between concurrent misses for different widths", async () => {
+    const jpeg = await makeJpeg({ width: 400, height: 300, quality: 80 });
+    origin = await startOrigin({
+      "/cat.jpg": { body: jpeg, contentType: "image/jpeg", delayMs: 50 },
+    });
+
+    const [a, b] = await Promise.all([
+      get({ image: `${origin.url}/cat.jpg`, width: "200" }),
+      get({ image: `${origin.url}/cat.jpg`, width: "300" }),
+    ]);
+
+    expect(origin.hits["/cat.jpg"]).toBe(1);
+    expect(await widthOf(a.rawPayload)).toBe(200);
+    expect(await widthOf(b.rawPayload)).toBe(300);
+  });
+
+  it("downloads per variant when its budget is 0", async () => {
+    setSourceCacheMaxBytes(0);
+    const jpeg = await makeJpeg({ width: 400, height: 300, quality: 80 });
+    origin = await startOrigin({ "/cat.jpg": { body: jpeg, contentType: "image/jpeg" } });
+
+    await get({ image: `${origin.url}/cat.jpg`, width: "200" });
+    await get({ image: `${origin.url}/cat.jpg`, width: "300" });
+
+    expect(origin.hits["/cat.jpg"]).toBe(2);
+    expect(sourceCacheBytes()).toBe(0);
+  });
+
+  it("does not hold an original larger than its budget", async () => {
+    const jpeg = await makeJpeg({ width: 400, height: 300, quality: 80 });
+    setSourceCacheMaxBytes(jpeg.byteLength - 1);
+    origin = await startOrigin({ "/cat.jpg": { body: jpeg, contentType: "image/jpeg" } });
+
+    await get({ image: `${origin.url}/cat.jpg`, width: "200" });
+    await get({ image: `${origin.url}/cat.jpg`, width: "300" });
+
+    expect(origin.hits["/cat.jpg"]).toBe(2);
+  });
+
+  it("does not hold a failed fetch", async () => {
+    origin = await startOrigin({ "/cat.jpg": { body: "nope", status: 500 } });
+
+    const a = await get({ image: `${origin.url}/cat.jpg`, width: "200" });
+    const b = await get({ image: `${origin.url}/cat.jpg`, width: "300" });
+
+    expect(a.statusCode).toBe(b.statusCode);
+    expect(a.statusCode).toBeGreaterThanOrEqual(500);
+    expect(origin.hits["/cat.jpg"]).toBe(2);
+    expect(sourceCacheBytes()).toBe(0);
+  });
+});
 
 describe("GET /cache — error handling [BUG-26]", () => {
   it("falls back to the original bytes when sharp cannot decode the payload", async () => {
@@ -976,6 +1093,7 @@ describe("bug ledger", () => {
   });
 
   it("BUG-17: quality should be part of the cache key", async () => {
+    countResponseMisses();
     const jpeg = await makeJpeg({ width: 400, height: 300, quality: 80 });
     origin = await startOrigin({ "/cat.jpg": { body: jpeg, contentType: "image/jpeg" } });
 

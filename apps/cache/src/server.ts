@@ -1,8 +1,9 @@
 import Fastify, { FastifyInstance, FastifyRequest } from "fastify";
 import sharp from "sharp";
-import { buildId, fromCache, toCache } from "./cache";
+import { buildId, fromCache, fromSourceCache, toCache, toSourceCache } from "./cache";
 import { probe } from "./is-animated";
 import { coalesce } from "./coalesce";
+import { createLimit, transformConcurrency } from "./limit";
 import {
   createUpstream,
   parseTrustedOrigins,
@@ -258,24 +259,27 @@ const defaultQuality = 75;
 export const avifQuality = 50;
 
 /**
- * aom's speed preset, and the only defensible point on a cold path.
+ * aom's speed preset. Effort 3 (aom speed 6) is the knee on a cold path.
  *
- * `effort` is not monotonic at the fast end: 0 and 2 produce *larger* files than
- * 4 (6,577 and 6,842 bytes vs 4,990), because aom's fastest presets disable the
- * rate-distortion search that makes AVIF worth using in the first place. Going
- * the other way, 6 saves a further 0.8% for 2.4x the time and 9 saves 0.8% for
- * 12.6x. So 4 is both the smallest output available cheaply and the knee.
+ * Effort 3 is where aom's all-intra mode starts pruning its partition and
+ * intra-mode search, so it costs a quarter of effort 4 for nearly the same file.
+ * Measured on linux-x64, quality 50, 4:2:0, CPU per encode, effort 4 -> 3:
  *
- * It is not cheap, and the `jpeg -> avif` benchmark scenario exists to keep that
- * visible. Measured there on darwin-arm64: 34.8ms against the plain jpeg path's
- * 11.8ms, and 138ms of CPU against its 14ms — roughly 3x the wall time but 10x
- * the CPU, because aom threads across cores and wall time hides that.
+ * - docs photo, 5272px -> 1200w: 3,360 -> 778 ms, 50,468 -> 51,752 bytes (+2.5%)
+ * - docs photo -> 400w: 501 -> 125 ms, 7,467 -> 7,507 bytes (+0.5%)
+ * - example-vite portrait, 1200px: 5,827 -> 1,300 ms, 107,670 -> 110,212 bytes (+2.4%)
+ * - synthetic benchmark fixture -> 400w: 256 -> 71 ms, 3,572 -> 4,141 bytes (+16%)
  *
- * Read the research table's "CPU x mozjpeg" column with care: every cell in it
- * reproduces exactly as that row's own `ms p50 / 10.96`, so it is a wall-time
- * ratio despite the name. Its 3.1x is the wall figure, not the CPU one.
+ * SSIM against the resized source fell by 0.001-0.003 on the photos and 0.008 on
+ * the synthetic fixture, whose hard-edged sinusoids are not a photo.
+ *
+ * The cost matters because a cold AVIF request is paid serially: sharp runs
+ * libvips single-threaded on glibc, so one 1200w AVIF at effort 4 is over three
+ * seconds of wall time, and on a 1-CPU host four concurrent ones took 16 s each.
+ *
+ * Below 3 the files grow: effort 2 is 5,379 bytes on the synthetic fixture.
  */
-export const avifEffort = 4;
+export const avifEffort = 3;
 
 /**
  * sharp encodes AVIF at 4:4:4 unless told otherwise, unlike its JPEG and WebP
@@ -297,7 +301,12 @@ export function imageFromMime(image: sharp.Sharp, mime?: string, quality?: numbe
     case "image/png":
       // png quality only bites with a palette, and forcing one would change the
       // output of every png request. Left lossless.
-      return image.png();
+      //
+      // Adaptive filtering picks a PNG filter per row instead of one for the
+      // whole image, and stays lossless. Measured on linux-x64 at 400w: the
+      // benchmark fixture 321,219 -> 178,440 bytes (-44%) for 27 -> 36 ms of
+      // CPU; a photo 409,806 -> 311,074 (-24%) for 53 -> 72 ms.
+      return image.png({ adaptiveFiltering: true });
     case "image/webp":
       return image.webp({ quality: effectiveQuality });
     case "image/avif":
@@ -312,7 +321,12 @@ export function imageFromMime(image: sharp.Sharp, mime?: string, quality?: numbe
     case "image/jpg":
     case "image/jpeg":
     default:
-      return image.jpeg({ mozjpeg: true, quality: effectiveQuality });
+      // mozjpeg's scan optimisation searches progressive scan layouts for the
+      // smallest file. It leaves the pixels untouched and costs about a fifth of
+      // the encode. Measured on linux-x64, resize then encode at quality 75: the
+      // example-vite portrait at 400w 58.5 -> 44.3 ms of CPU for 28,560 ->
+      // 28,801 bytes (+0.8%), the hero at 1200w 180 -> 150 ms for +1.1%.
+      return image.jpeg({ mozjpeg: true, optimiseScans: false, quality: effectiveQuality });
   }
 }
 
@@ -363,6 +377,8 @@ export interface BuildServerOptions {
   maxUpstreamBytes?: number;
   /** Origins that skip the address check. Overrides `TRUSTED_ORIGINS`. */
   trustedOrigins?: readonly string[];
+  /** Image transforms allowed at once. Overrides `TRANSFORM_CONCURRENCY`. */
+  transformConcurrency?: number;
 }
 
 /**
@@ -389,6 +405,38 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
     maxBytes:
       options.maxUpstreamBytes ?? readPositiveEnv("UPSTREAM_MAX_BYTES", DEFAULT_MAX_UPSTREAM_BYTES),
   });
+
+  // Every sharp call goes through this, so a burst of misses queues instead of
+  // time-slicing more transforms than there are cores. See `createLimit`.
+  const transform = createLimit(options.transformConcurrency ?? transformConcurrency());
+
+  /**
+   * The upstream original for a source url, downloaded at most once while it is
+   * held. The response cache and its coalescer are keyed per variant, so without
+   * this every width and format of one source pays its own download. Concurrent
+   * misses for different variants share the one in flight.
+   *
+   * Only the body and its raw content type are kept. A failed fetch rejects
+   * every waiter and is not retained, so the next request retries.
+   */
+  const fetchSource = (url: string) => {
+    const held = fromSourceCache(url);
+    if (held) {
+      return Promise.resolve(held);
+    }
+
+    // `upstream.check` admits only http(s) urls, so no response id can collide
+    return coalesce(`source:${url}`, async () => {
+      const response = await upstream.fetch(url);
+      const record = {
+        // axios types header values as `AxiosHeaderValue | undefined`
+        contentType: (response.headers["content-type"] as string | undefined) ?? "",
+        buffer: response.data,
+      };
+      toSourceCache(url, record);
+      return record;
+    });
+  };
 
   fastify.get("/", async (request, reply) => {
     reply.type("application/json").code(200);
@@ -463,26 +511,23 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
 
     try {
       result = await coalesce(id, async () => {
-        const image = await upstream.fetch(request.query.image);
+        const source = await fetchSource(request.query.image);
 
-        // axios types response header values as `AxiosHeaderValue | undefined`.
         // What reaches the wire is whatever resolveResponseMime is willing to
         // vouch for, never the raw header.
-        const upstreamContentType = resolveResponseMime(
-          image.headers["content-type"] as string | undefined
-        );
+        const upstreamContentType = resolveResponseMime(source.contentType);
 
         // Not transformable, so relay it. It is cached too: the proxy is willing
         // to serve these bytes repeatedly, and an SVG that re-downloads from the
         // origin on every request is the same upstream load the cache exists to
         // remove.
         if (!isSupported(upstreamContentType)) {
-          const body = image.data;
+          const body = source.buffer;
           toCache(id, { contentType: upstreamContentType, buffer: body });
           return { contentType: upstreamContentType, body };
         }
 
-        const imageBuffer = image.data;
+        const imageBuffer = source.buffer;
 
         // Animated input is relayed untouched, whatever container it arrived in.
         // sharp loads one page by default, so `resize()` returns a valid file
@@ -493,7 +538,7 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
         // No mime guard: the probe asks the decoder rather than reading fixed
         // offsets, so it cannot mistake a JPEG's quantization table for a GIF
         // extension block the way the guard this replaced could.
-        const probed = await probe(imageBuffer);
+        const probed = await transform(() => probe(imageBuffer));
 
         if (probed.frames !== null && probed.frames > 1) {
           toCache(id, {
@@ -509,13 +554,15 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
         let compressedBuffer: Buffer;
 
         try {
-          compressedBuffer = await compress(imageBuffer, {
-            contentType: outputMime,
-            width: resolved.width,
-            blur: resolved.blur,
-            quality: resolved.quality,
-            noOpProfile: probed.noOpProfile,
-          });
+          compressedBuffer = await transform(() =>
+            compress(imageBuffer, {
+              contentType: outputMime,
+              width: resolved.width,
+              blur: resolved.blur,
+              quality: resolved.quality,
+              noOpProfile: probed.noOpProfile,
+            })
+          );
         } catch (error) {
           // The bytes are already here and the client wants an image, so serve
           // the original rather than turning one undecodable payload into a 500.

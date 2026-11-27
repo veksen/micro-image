@@ -6,7 +6,7 @@
   "author": "Jean-Philippe Sirois <jp@veksen.net>",
   "license": "MIT",
   "scripts": {
-    "start": "node dist/index.js",
+    "start": "MALLOC_ARENA_MAX=2 node dist/index.js",
     "build": "tsc",
     "typecheck": "tsc --noEmit",
     "dev": "tsx watch src/index.ts",
