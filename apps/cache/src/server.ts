@@ -1,6 +1,6 @@
 import Fastify, { FastifyInstance, FastifyRequest } from "fastify";
 import sharp from "sharp";
-import { buildId, fromCache, toCache } from "./cache";
+import { buildId, fromCache, fromSourceCache, toCache, toSourceCache } from "./cache";
 import { probe } from "./is-animated";
 import { coalesce } from "./coalesce";
 import {
@@ -393,6 +393,34 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
       options.maxUpstreamBytes ?? readPositiveEnv("UPSTREAM_MAX_BYTES", DEFAULT_MAX_UPSTREAM_BYTES),
   });
 
+  /**
+   * The upstream original for a source url, downloaded at most once while it is
+   * held. The response cache and its coalescer are keyed per variant, so without
+   * this every width and format of one source pays its own download. Concurrent
+   * misses for different variants share the one in flight.
+   *
+   * Only the body and its raw content type are kept. A failed fetch rejects
+   * every waiter and is not retained, so the next request retries.
+   */
+  const fetchSource = (url: string) => {
+    const held = fromSourceCache(url);
+    if (held) {
+      return Promise.resolve(held);
+    }
+
+    // `upstream.check` admits only http(s) urls, so no response id can collide
+    return coalesce(`source:${url}`, async () => {
+      const response = await upstream.fetch(url);
+      const record = {
+        // axios types header values as `AxiosHeaderValue | undefined`
+        contentType: (response.headers["content-type"] as string | undefined) ?? "",
+        buffer: response.data,
+      };
+      toSourceCache(url, record);
+      return record;
+    });
+  };
+
   fastify.get("/", async (request, reply) => {
     reply.type("application/json").code(200);
     return { hello: "world" };
@@ -466,26 +494,23 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
 
     try {
       result = await coalesce(id, async () => {
-        const image = await upstream.fetch(request.query.image);
+        const source = await fetchSource(request.query.image);
 
-        // axios types response header values as `AxiosHeaderValue | undefined`.
         // What reaches the wire is whatever resolveResponseMime is willing to
         // vouch for, never the raw header.
-        const upstreamContentType = resolveResponseMime(
-          image.headers["content-type"] as string | undefined
-        );
+        const upstreamContentType = resolveResponseMime(source.contentType);
 
         // Not transformable, so relay it. It is cached too: the proxy is willing
         // to serve these bytes repeatedly, and an SVG that re-downloads from the
         // origin on every request is the same upstream load the cache exists to
         // remove.
         if (!isSupported(upstreamContentType)) {
-          const body = image.data;
+          const body = source.buffer;
           toCache(id, { contentType: upstreamContentType, buffer: body });
           return { contentType: upstreamContentType, body };
         }
 
-        const imageBuffer = image.data;
+        const imageBuffer = source.buffer;
 
         // Animated input is relayed untouched, whatever container it arrived in.
         // sharp loads one page by default, so `resize()` returns a valid file
