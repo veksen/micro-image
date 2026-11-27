@@ -258,24 +258,27 @@ const defaultQuality = 75;
 export const avifQuality = 50;
 
 /**
- * aom's speed preset, and the only defensible point on a cold path.
+ * aom's speed preset. Effort 3 (aom speed 6) is the knee on a cold path.
  *
- * `effort` is not monotonic at the fast end: 0 and 2 produce *larger* files than
- * 4 (6,577 and 6,842 bytes vs 4,990), because aom's fastest presets disable the
- * rate-distortion search that makes AVIF worth using in the first place. Going
- * the other way, 6 saves a further 0.8% for 2.4x the time and 9 saves 0.8% for
- * 12.6x. So 4 is both the smallest output available cheaply and the knee.
+ * Effort 3 is where aom's all-intra mode starts pruning its partition and
+ * intra-mode search, so it costs a quarter of effort 4 for nearly the same file.
+ * Measured on linux-x64, quality 50, 4:2:0, CPU per encode, effort 4 -> 3:
  *
- * It is not cheap, and the `jpeg -> avif` benchmark scenario exists to keep that
- * visible. Measured there on darwin-arm64: 34.8ms against the plain jpeg path's
- * 11.8ms, and 138ms of CPU against its 14ms — roughly 3x the wall time but 10x
- * the CPU, because aom threads across cores and wall time hides that.
+ * - docs photo, 5272px -> 1200w: 3,360 -> 778 ms, 50,468 -> 51,752 bytes (+2.5%)
+ * - docs photo -> 400w: 501 -> 125 ms, 7,467 -> 7,507 bytes (+0.5%)
+ * - example-vite portrait, 1200px: 5,827 -> 1,300 ms, 107,670 -> 110,212 bytes (+2.4%)
+ * - synthetic benchmark fixture -> 400w: 256 -> 71 ms, 3,572 -> 4,141 bytes (+16%)
  *
- * Read the research table's "CPU x mozjpeg" column with care: every cell in it
- * reproduces exactly as that row's own `ms p50 / 10.96`, so it is a wall-time
- * ratio despite the name. Its 3.1x is the wall figure, not the CPU one.
+ * SSIM against the resized source fell by 0.001-0.003 on the photos and 0.008 on
+ * the synthetic fixture, whose hard-edged sinusoids are not a photo.
+ *
+ * The cost matters because a cold AVIF request is paid serially: sharp runs
+ * libvips single-threaded on glibc, so one 1200w AVIF at effort 4 is over three
+ * seconds of wall time, and on a 1-CPU host four concurrent ones took 16 s each.
+ *
+ * Below 3 the files grow: effort 2 is 5,379 bytes on the synthetic fixture.
  */
-export const avifEffort = 4;
+export const avifEffort = 3;
 
 /**
  * sharp encodes AVIF at 4:4:4 unless told otherwise, unlike its JPEG and WebP

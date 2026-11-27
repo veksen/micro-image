@@ -325,7 +325,7 @@ describe("GET /cache — AVIF output", () => {
     expect(meta.compression).toBe("av1");
   });
 
-  it("encodes at quality 50, effort 4, 4:2:0 when the request asks for no quality", async () => {
+  it("encodes at quality 50, effort 3, 4:2:0 when the request asks for no quality", async () => {
     const jpeg = await photo();
     origin = await startOrigin({ "/cat.jpg": { body: jpeg, contentType: "image/jpeg" } });
 
@@ -333,8 +333,8 @@ describe("GET /cache — AVIF output", () => {
 
     // Byte-compared against the settings this pins rather than asserted loosely.
     // The alternatives are not merely worse: quality 75 is LARGER than the jpeg
-    // the proxy would otherwise have served, and effort 0/2 are larger than
-    // effort 4. A size assertion would pass on any of them.
+    // the proxy would otherwise have served, and effort 2 is larger than
+    // effort 3. A size assertion would pass on any of them.
     //
     // The pipeline is rebuilt here rather than reusing `compress`, so the test
     // does not assert the code under test against itself. That makes it a
@@ -349,7 +349,7 @@ describe("GET /cache — AVIF output", () => {
       .toBuffer();
 
     expect(avifQuality).toBe(50);
-    expect(avifEffort).toBe(4);
+    expect(avifEffort).toBe(3);
     expect(avifChromaSubsampling).toBe("4:2:0");
     expect(Buffer.compare(res.rawPayload, expected)).toBe(0);
   });
