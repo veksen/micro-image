@@ -3,6 +3,7 @@ import sharp from "sharp";
 import { buildId, fromCache, fromSourceCache, toCache, toSourceCache } from "./cache";
 import { probe } from "./is-animated";
 import { coalesce } from "./coalesce";
+import { createLimit, transformConcurrency } from "./limit";
 import {
   createUpstream,
   parseTrustedOrigins,
@@ -366,6 +367,8 @@ export interface BuildServerOptions {
   maxUpstreamBytes?: number;
   /** Origins that skip the address check. Overrides `TRUSTED_ORIGINS`. */
   trustedOrigins?: readonly string[];
+  /** Image transforms allowed at once. Overrides `TRANSFORM_CONCURRENCY`. */
+  transformConcurrency?: number;
 }
 
 /**
@@ -392,6 +395,10 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
     maxBytes:
       options.maxUpstreamBytes ?? readPositiveEnv("UPSTREAM_MAX_BYTES", DEFAULT_MAX_UPSTREAM_BYTES),
   });
+
+  // Every sharp call goes through this, so a burst of misses queues instead of
+  // time-slicing more transforms than there are cores. See `createLimit`.
+  const transform = createLimit(options.transformConcurrency ?? transformConcurrency());
 
   /**
    * The upstream original for a source url, downloaded at most once while it is
@@ -521,7 +528,7 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
         // No mime guard: the probe asks the decoder rather than reading fixed
         // offsets, so it cannot mistake a JPEG's quantization table for a GIF
         // extension block the way the guard this replaced could.
-        const probed = await probe(imageBuffer);
+        const probed = await transform(() => probe(imageBuffer));
 
         if (probed.frames !== null && probed.frames > 1) {
           toCache(id, {
@@ -537,13 +544,15 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
         let compressedBuffer: Buffer;
 
         try {
-          compressedBuffer = await compress(imageBuffer, {
-            contentType: outputMime,
-            width: resolved.width,
-            blur: resolved.blur,
-            quality: resolved.quality,
-            noOpProfile: probed.noOpProfile,
-          });
+          compressedBuffer = await transform(() =>
+            compress(imageBuffer, {
+              contentType: outputMime,
+              width: resolved.width,
+              blur: resolved.blur,
+              quality: resolved.quality,
+              noOpProfile: probed.noOpProfile,
+            })
+          );
         } catch (error) {
           // The bytes are already here and the client wants an image, so serve
           // the original rather than turning one undecodable payload into a 500.
